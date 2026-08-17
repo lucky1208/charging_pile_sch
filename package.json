@@ -1,0 +1,15 @@
+{
+  "name": "evse-schematic-design",
+  "version": "3.0.0",
+  "private": true,
+  "description": "充电桩确定性选型与电气原理图自动生成平台（方案级，须经专业复核）",
+  "scripts": {
+    "start": "npx serve .",
+    "test": "node tests/engine.test.js && node tests/drawing-skill.test.js && node tests/regression-contract.test.js && node tests/draw-lint.test.js",
+    "test:engine": "node tests/engine.test.js",
+    "test:drawing-skill": "node tests/drawing-skill.test.js",
+    "test:contracts": "node tests/regression-contract.test.js",
+    "test:drawings": "node tests/draw-lint.test.js",
+    "check": "node --check js/symbols.js && node --check js/ev-standards.js && node --check js/design-model.js && node --check js/drawing-skill.js && node --check js/vendors.js && node --check js/engine.js && node --check js/layout.js && node --check js/draw-pile.js && node --check js/dxf-export.js && node --check js/app.js && node --check api/ai.js"
+  }
+}
