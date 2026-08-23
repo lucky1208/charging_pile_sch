@@ -15,7 +15,7 @@
 
 ## 快速生成
 
-需要 Node.js 20 或以上。根项目的测试会同时发现 `component-workbench/` 的安全测试，因此以整个仓库中要求较高的 Node.js 20 作为统一运行基线。
+需要 Node.js 24.x。Vercel 与根项目固定使用当前受支持的 Node.js 24 主版本；`component-workbench/` 仍保持 Node.js 20 以上兼容。
 
 ```powershell
 node scripts\generate.js --params .\params.json --out .\output --name demo

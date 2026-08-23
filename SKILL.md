@@ -49,7 +49,7 @@ RequirementSpec（来源/置信度/未决项/人工确认）
 
 1. 只提取用户明确给出的需求。字段、枚举和默认值见 `references/parameters.md`；未知专项要求原文放入 `specialRequirements`。
 2. 把参数保存为 UTF-8 JSON，例如 `params.json`。
-3. 在 Node.js 20 或以上运行：
+3. 在 Node.js 24.x 运行：
 
    ```powershell
    node <skill目录>\scripts\generate.js --params params.json --out <输出目录> --name <文件名前缀>

@@ -1,11 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "npm run build",
+  "outputDirectory": "web",
   "cleanUrls": true,
   "trailingSlash": false,
-  "rewrites": [
-    { "source": "/", "destination": "/web/index.html" },
-    { "source": "/js/:path*", "destination": "/web/js/:path*" }
-  ],
   "headers": [
     {
       "source": "/api/(.*)",
