@@ -1,0 +1,5 @@
+Example contactor terminal data
+Document revision: REV-A
+Model: DC100-24V
+Terminal X1/1 is the positive high-voltage input.
+Coil nominal voltage: 24 VDC.

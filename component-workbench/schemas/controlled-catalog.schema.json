@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/evse/controlled-catalog.schema.json",
+  "title": "Controlled approved EVSE component catalog",
+  "type": "object",
+  "required": ["schemaVersion", "catalogVersion", "generatedAt", "records"],
+  "properties": {
+    "schemaVersion": { "const": "evse.controlled-component-catalog/v1" },
+    "catalogVersion": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["recordId", "revision", "recordSha256", "state", "autoWiringAllowed", "source", "payload"],
+        "properties": {
+          "recordId": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 3 },
+          "recordSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "state": { "const": "APPROVED" },
+          "autoWiringAllowed": { "const": true },
+          "source": { "type": "object" },
+          "payload": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

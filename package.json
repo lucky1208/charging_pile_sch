@@ -1,15 +1,20 @@
 {
   "name": "evse-schematic-design",
-  "version": "3.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "充电桩确定性选型与电气原理图自动生成平台（方案级，须经专业复核）",
+  "description": "Deterministic EVSE terminal-netlist and schematic compiler",
   "scripts": {
-    "start": "npx serve .",
-    "test": "node tests/engine.test.js && node tests/drawing-skill.test.js && node tests/regression-contract.test.js && node tests/draw-lint.test.js",
-    "test:engine": "node tests/engine.test.js",
-    "test:drawing-skill": "node tests/drawing-skill.test.js",
-    "test:contracts": "node tests/regression-contract.test.js",
-    "test:drawings": "node tests/draw-lint.test.js",
-    "check": "node --check js/symbols.js && node --check js/ev-standards.js && node --check js/design-model.js && node --check js/drawing-skill.js && node --check js/vendors.js && node --check js/engine.js && node --check js/layout.js && node --check js/draw-pile.js && node --check js/dxf-export.js && node --check js/app.js && node --check api/ai.js"
+    "start": "npx serve web",
+    "build": "node scripts/sync-web.js",
+    "sync:web": "node scripts/sync-web.js",
+    "test": "node --test",
+    "verify": "npm run sync:web && npm test",
+    "test:matrix": "node --test tests/geometry-matrix.test.js",
+    "test:p3": "npm test --prefix component-workbench",
+    "test:requirements": "node --test tests/requirement-spec.test.js",
+    "test:sync": "node --test tests/source-sync.test.js"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

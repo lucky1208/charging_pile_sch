@@ -1,99 +1,103 @@
-# 充电桩电气原理图自动设计平台
+# EVSE Schematic Design 2.0
 
-面向充电桩早期方案设计的确定性工程平台。填写充电标准、功率、枪数与储能配置后，平台按确定性算法选取功率模块、开关、接触器、快熔、传感器、电池簇与变换器档位，并自动生成 A3 充电桩电气原理图、可编辑 DXF 概念草图和 JSON 方案包。
+这是一个方案级充电桩电气设计编译器。输入经过需求确认后，被编译为 EDEM v4 端子级网表；SVG 和 DXF 都从同一 Drawing IR 生成，并由 ERC、几何与图模覆盖闸门 fail-closed。
 
-> 重要边界：本项目输出是 `CONCEPT_DRAFT—PROFESSIONAL_REVIEW_REQUIRED`，不是生产图、施工图、设备报价、保护整定书、型式试验结论或任何标准符合性证明。适用标准、现场资料、专业计算、认证与签发必须由具备相应资格的人员完成。
+> 输出仅用于方案比较与工程深化输入，须经电气专业复核和签发；不构成生产图、施工图或合规证明。
 
-## 当前能力
+## 本次 P0–P3 改造
 
-平台只输出一张图：**充电桩电气原理图**（A3 横向）。图面分区如下：
+- **P0 — 输入与运行时**：Web/CLI 共用 `RequirementSpec`；修复“无储能”、标准电压联动和标准识别；低置信度/未决项要求人工确认；未实现标准与桩型明确阻断；`engine/` 成为唯一核心源码。
+- **P1 — 电气真值**：EDEM v4 明确建模 L1/L2/L3/N、DC+/DC−、PE、24V/0V、12V/0V、枪针脚、接触器线圈和储能原子保护器件；新增受控设备类目录与端子级 ERC。
+- **P2 — 几何与导出**：确定性 placement、通道与区间图 lane 分配、正交路由、全局交叉后处理、keepout、Drawing IR 和 exact coverage；SVG/DXF 同源且保留可追溯 ID。
+- **P3 — 器件导入**：安全的资料草稿、证据、审核、批准、废弃和受控 JSON 导出工作台；上传内容永不作为代码执行。
 
-| 分区 | 内容 | 明确边界 |
-|---|---|---|
-| ① 交流进线与保护 | 进线端子、隔离开关、断路器、SPD、剩余电流监测、交流计量、主接触器、交流母排 | 分断能力、保护配合与选择性待短路计算书 |
-| ② 功率变换 | AC/DC 功率模块阵列（数量由装机功率推算）、并联均流 | 模块降额曲线、并联环流与 EMC 待样机实测 |
-| ③ 直流保护与计量 | 总快熔、霍尔电流传感器、直流计量、绝缘监测 IMD、母线泄放 | 绝缘判据、响应时间与泄放阻值待专项确认 |
-| ④ 充电枪回路 | 每枪独立快熔 + 正/负极直流接触器 + 电子锁 + PE + 控制导引/通信 | 端子温升、枪线选型与接口一致性测试待验证 |
-| ⑤ 储能系统 | 电池簇、熔断/主接触器/预充、储能母线、双向 DC/DC 或 PCS、BAMS | 电池安全、消防、并离网切换与并网批复待专项 |
-| ⑥ 二次控制与通信 | CCU、SECC/计费网关、路由器、显示与读卡、急停、门禁、环境监测 | 联锁矩阵、网络安全与后台协议一致性待深化 |
-| ⑦ 辅助电源与配电 | AC/DC 24V、12V 开关电源、辅助母排与各回路馈出、热管理 | 温升、风量/流量与低温策略待热工计算 |
-| 图例 / 设备明细表 | 线型分域图例；位号、名称、规格档位集中列表 | 全部条目标记 `RFQ_REQUIRED` |
+详细架构见 [P0–P3 架构与安全边界](docs/P0-P3-ARCHITECTURE.md)，完整交付结果见 [P0–P3 最终验收报告](docs/P0-P3-VERIFICATION.md)，P2 几何专项见 [216 矩阵验收报告](docs/P2-DRAWING-IR-VERIFICATION.md)。
 
-支持的充电标准：
+## 快速生成
 
-| 标准 | 接口 | 通信 | 进线 |
-|---|---|---|---|
-| 国标 GB/T | GB/T 20234.3（9 芯，DC±/PE/S±/CC1/CC2/A±） | GB/T 27930 CAN 250kbps | AC 380V 3P+N+PE |
-| 欧标 CCS2 | IEC 62196-3 Configuration FF（DC±/PE/CP/PP） | DIN 70121 / ISO 15118（HomePlug Green PHY） | AC 400V 3P+N+PE |
-| 美标 CCS1 | IEC 62196-3 Configuration EE（DC±/PE/CP/PP） | DIN 70121 / ISO 15118 / SAE J2847-2 | AC 480V 3P+PE（Delta，无中性线） |
+需要 Node.js 20 或以上。根项目的测试会同时发现 `component-workbench/` 的安全测试，因此以整个仓库中要求较高的 Node.js 20 作为统一运行基线。
 
-## 自动选型算法做了什么
-
-1. **功率链**：按额定功率与单模块功率确定模块台数与装机功率，向上取整的差额记为降额裕度假设。
-2. **交流侧**：按模块效率、功率因数，并计入热管理与辅助电源负荷，推算进线电流，再按 1.25 倍在标称档位序列上选断路器、接触器、母排与电缆截面。
-3. **直流侧**：总电流取“按最低输出电压的功率电流”与“枪数 × 单枪电流”的较小值，据此选总快熔、母排与传感器量程。
-4. **枪回路**：按单枪电流选快熔、正/负极直流接触器与枪线（区分常规风冷/液冷枪线），按标准确定端子、电子锁与控制导引。
-5. **储能**：按目标容量与电池化学体系选簇标称电压（1P160S / 1P240S）与电芯 Ah，**优先用最少簇数**满足容量；再按耦合方式（直流侧 DC/DC 或交流侧 PCS）选变换器台数，并推算簇电流、快熔、主接触器与预充电阻。
-6. **辅助与热管理**：按枪数、风机数与加热配置估算 24V/12V 负载，选开关电源功率档位。
-
-所需容量超出内置标称档位序列时，引擎显式告警并要求电气专业另行选型，**不会静默按最大档位取值**。
-
-## 工程模型原则
-
-- `js/ev-standards.js` 提供标准接口约定与器件标称档位序列；不复制参考图中的任何具体额定值、料号或厂商型号。
-- `js/design-model.js` 产生唯一的 EVSE Engineering Design Model（EDEM）；设备、回路、端口和枪支路均有稳定 ID。
-- `js/engine.js` 只进行可复现的确定性选型计算；相同输入必然得到完全相同的输出。
-- `js/draw-pile.js` 只读取 EDEM/计算结果渲染，不能另行决定设备数量或拓扑。
-- `js/drawing-skill.js` 把 sch_lib 参考图提炼的规则做成阻断式校验；语义图或渲染检查不通过时禁止导出。
-- AI 只翻译自由文本；AI 不能改写计算、器件档位、保护策略或 SVG 几何。
-- 设备目录与价格为受控示例数据（通用示例厂商名），所有条目均标记 `RFQ_REQUIRED`。
-
-## 本地运行与校验
-
-```bash
-npm run check   # 语法检查
-npm test        # 引擎回归 + 规则包回归 + 交付契约 + 图纸文字体检
-npx serve .
+```powershell
+node scripts\generate.js --params .\params.json --out .\output --name demo
 ```
 
-`npm test` 中的 `draw-lint` 会在 5 组参数组合（国标/欧标/美标、1~4 枪、有/无储能、风冷/液冷）下检查图纸文字重叠与越界，目标均为 0。
+最小参数：
 
-## 可选的服务端 AI
+```json
+{
+  "pileName": "120kW 双枪充电桩",
+  "standard": "gb",
+  "archetype": "dc-integrated",
+  "outputKw": 120,
+  "gunCount": 2,
+  "gunCurrentA": 250,
+  "moduleKw": 30,
+  "voltageWindow": "200-1000",
+  "thermal": "air",
+  "essEnabled": false
+}
+```
 
-浏览器从不接收、保存或提交 API Key。可选 AI 仅经同源 `POST /api/ai` 访问，密钥仅设置在 Vercel 环境变量中：
+成功后得到：
 
-| Provider | Required environment variable | Optional model variable |
-|---|---|---|
-| Kimi | `MOONSHOT_API_KEY` | `KIMI_MODEL` |
-| DeepSeek | `DEEPSEEK_API_KEY` | `DEEPSEEK_MODEL` |
-| GLM | `ZHIPUAI_API_KEY` | `ZHIPUAI_MODEL` |
+- `demo.svg`：A3 方案级端子原理图；
+- `demo.dxf`：直接由 Drawing IR 生成的 R2010 DXF；
+- `demo.json`：需求、选型、EDEM、ERC、图模审计和导出闸门的完整方案包。
 
-部署后，在 Vercel Project Settings → Environment Variables 设置上述变量，然后重新部署。不要把密钥写入 `index.html`、客户端 JavaScript、Git 仓库、截图或自然语言需求框。
+字段契约见 [parameters.md](references/parameters.md)。当前只开放经过矩阵验证的 `GB/EU/US + dc-integrated`；NACS、CHAdeMO 和其他桩型会明确 fail-closed。
 
-## Vercel 部署
+## Web
 
-导入 Git 仓库即可部署静态前端和 `api/ai.js`。`vercel.json` 为 API 配置 `no-store`，并设置基础安全响应头。生产环境还应在 Vercel 中限制环境变量访问、启用 GitHub MFA/部署保护，并定期审查日志。
+```powershell
+npx serve web
+```
 
-## 目录结构
+此静态启动方式可以完整使用表单、本地规则需求解析、确定性选型和出图。Kimi、DeepSeek、GLM 等远程需求翻译由仓库中的同源 `/api/ai` 服务端代理提供；静态服务不运行该函数时页面会安全回退到本地规则解析。
+
+Web 只加载自动生成的 `web/js/engine-bundle.js` 和交互层 `web/js/app.js`。修改任何 `engine/*.js` 后运行：
+
+```powershell
+npm run sync:web
+```
+
+不要手工修改 `web/js/` 中与 `engine/` 同名的核心副本。
+
+仓库保留同源服务端代理 `api/ai.js`。完整本地部署可使用 `vercel dev`；Vercel 环境变量按需配置 `MOONSHOT_API_KEY`、`DEEPSEEK_API_KEY` 或 `ZHIPUAI_API_KEY`，浏览器端不保存 API Key。仅执行 `npm start` 时使用静态表单、本地规则解析和确定性出图，远程 AI 不可用会安全回退。
+
+## 测试
+
+```powershell
+npm run verify
+```
+
+`verify` 会先从 `engine/` 重建并校验 Web bundle，再执行全部单元、集成、安全、破坏变异和 216 组合矩阵测试。只运行矩阵或 P3 工作台测试可分别使用 `npm run test:matrix`、`npm run test:p3`。
+
+主要覆盖：
+
+- 216 个已支持参数组合的 ERC、SVG、Drawing IR、图模覆盖和导出闸门；
+- 极性、电压域、PE、端点、审批状态与 coverage 破坏变异；
+- 路由 lane 容量、交叉、共线重叠、不同网接触和 keepout；
+- SVG/DXF equipment/net/circuit/endpoint 追溯；
+- RequirementSpec、CLI fail-closed、Web bundle 和单一源码同步；
+- 元器件生命周期、证据、哈希修订链及恶意输入不执行。
+
+## 元器件工作台
+
+```powershell
+node component-workbench\cli.js --help
+npm test --prefix component-workbench
+```
+
+工作流与示例见 [component-workbench/README.md](component-workbench/README.md)。该工作台产生的是声明式候选与受控目录，不生成或安装可执行 skill/JavaScript；当前它与生产 `engine/` 隔离，导出的目录不会被引擎自动加载。
+
+## 核心目录
 
 ```text
-index.html              充电桩设计表单、原理图展示与工程边界说明
-api/ai.js               同源 AI 代理（无浏览器 API Key）
-js/ev-standards.js      充电标准、接口、器件标称档位与电池/电缆表
-js/design-model.js      EDEM 规范化工程模型（命名端口与回路）
-js/engine.js            确定性选型计算、设备明细表、BOM 与校核清单
-js/drawing-skill.js     sch_lib 提炼的绘图规则包与导出闸门
-js/symbols.js           SVG 图框、标题栏、符号、图例与明细表组件
-js/draw-pile.js         充电桩电气原理图渲染器
-js/layout.js            确定性布局辅助
-js/vendors.js           受控示例目录（通用示例厂商，非报价）
-js/dxf-export.js        SVG 基础图元 → R2010 DXF 概念草图
-js/app.js              表单、需求翻译、渲染、缩放与导出
-knowledge/              sch_lib 绘图规则包说明
-sch_lib/                国标 60kW 与欧标储能充电桩参考原理图（只作画法证据）
-tests/                  引擎回归、规则包回归、交付契约与图纸文字体检
+engine/                  唯一核心源码：需求、目录、EDEM、ERC、IR、渲染、DXF
+scripts/                 CLI、核心加载顺序与 Web 同步
+web/                     表单与生成的浏览器 bundle
+tests/                   单元、集成、变异与 216 矩阵
+component-workbench/     P3 器件资料导入与审批
+docs/                    架构及验收报告
+references/              参数、标准与参考边界说明
 ```
-
-## 标准使用方式
-
-图纸表达可将 IEC 61082（文件编制）、IEC 60617 / GB/T 4728（图形符号）、ISO 5457 / ISO 7200（图幅与标题栏）以及所选充电标准作为项目标准基线的输入；短路与保护配合、EMC 与谐波、温升与降载、绝缘与接地、电池安全与消防、计量检定、并网审批与市场准入必须按项目合同、适用版本和当地主管部门要求由专业团队确认。仓库不会把这些标准名称当作自动合规结论。

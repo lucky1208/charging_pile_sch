@@ -3,3 +3,7 @@ node_modules/
 *.log
 .vercel
 tests/out-*.svg
+.verification-output/
+.tmp-*/
+component-workbench/.store/
+component-workbench/.exports/

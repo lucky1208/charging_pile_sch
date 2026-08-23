@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/evse/component-candidate.schema.json",
+  "title": "EVSE component extraction candidate",
+  "description": "Declarative, untrusted extraction candidate. It is data only and cannot contain executable JavaScript.",
+  "type": "object",
+  "required": ["schemaVersion", "recordId", "deviceClass", "partVariant"],
+  "properties": {
+    "schemaVersion": { "const": "evse.component-candidate/v1" },
+    "recordId": {
+      "type": "string",
+      "pattern": "^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:[._-]|$))[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+    },
+    "deviceClass": { "$ref": "#/$defs/DeviceClass" },
+    "partVariant": { "$ref": "#/$defs/PartVariant" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "BBox": {
+      "type": "object",
+      "required": ["x", "y", "width", "height", "unit"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0 },
+        "y": { "type": "number", "minimum": 0 },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 },
+        "unit": { "enum": ["PDF_PT", "NORMALIZED", "PIXELS", "TEXT_LINES"] }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceCandidate": {
+      "type": "object",
+      "required": ["page", "bbox", "quote"],
+      "properties": {
+        "page": { "type": "integer", "minimum": 1 },
+        "bbox": { "$ref": "#/$defs/BBox" },
+        "quote": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceList": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/EvidenceCandidate" }
+    },
+    "Claim": {
+      "type": "object",
+      "required": ["value", "confidence", "evidence"],
+      "properties": {
+        "value": { "type": ["string", "number", "boolean"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "$ref": "#/$defs/EvidenceList" }
+      },
+      "additionalProperties": false
+    },
+    "StringClaim": {
+      "allOf": [
+        { "$ref": "#/$defs/Claim" },
+        { "properties": { "value": { "type": "string", "minLength": 1 } } }
+      ]
+    },
+    "IdClaim": {
+      "allOf": [
+        { "$ref": "#/$defs/StringClaim" },
+        { "properties": { "value": { "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._:+-]{0,126}[A-Za-z0-9])?$" } } }
+      ]
+    },
+    "DirectionClaim": {
+      "allOf": [
+        { "$ref": "#/$defs/StringClaim" },
+        { "properties": { "value": { "enum": ["INPUT", "OUTPUT", "BIDIRECTIONAL", "PASSIVE", "UNKNOWN"] } } }
+      ]
+    },
+    "DomainClaim": {
+      "allOf": [
+        { "$ref": "#/$defs/StringClaim" },
+        { "properties": { "value": { "pattern": "^[A-Z][A-Z0-9_+.-]*$" } } }
+      ]
+    },
+    "TerminalRefClaim": {
+      "allOf": [
+        { "$ref": "#/$defs/StringClaim" },
+        { "properties": { "value": { "pattern": "^[A-Za-z0-9._:+-]+/[A-Za-z0-9._:+-]+$" } } }
+      ]
+    },
+    "EntityBase": {
+      "type": "object",
+      "required": ["kind", "confidence", "evidence"],
+      "properties": {
+        "kind": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "$ref": "#/$defs/EvidenceList" }
+      }
+    },
+    "Attribute": {
+      "allOf": [
+        { "$ref": "#/$defs/EntityBase" },
+        {
+          "type": "object",
+          "required": ["key", "value", "unit"],
+          "properties": {
+            "kind": { "const": "Attribute" },
+            "key": { "$ref": "#/$defs/IdClaim" },
+            "value": { "$ref": "#/$defs/Claim" },
+            "unit": { "$ref": "#/$defs/StringClaim" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "FunctionalPort": {
+      "allOf": [
+        { "$ref": "#/$defs/EntityBase" },
+        {
+          "type": "object",
+          "required": ["id", "name", "direction", "electricalDomain", "purpose", "physicalTerminalRefs"],
+          "properties": {
+            "kind": { "const": "FunctionalPort" },
+            "id": { "$ref": "#/$defs/IdClaim" },
+            "name": { "$ref": "#/$defs/StringClaim" },
+            "direction": { "$ref": "#/$defs/DirectionClaim" },
+            "electricalDomain": { "$ref": "#/$defs/DomainClaim" },
+            "purpose": { "$ref": "#/$defs/StringClaim" },
+            "physicalTerminalRefs": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/TerminalRefClaim" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "PhysicalTerminal": {
+      "allOf": [
+        { "$ref": "#/$defs/EntityBase" },
+        {
+          "type": "object",
+          "required": ["id", "designation", "function", "electricalDomain", "direction", "functionalPortRefs", "attributes"],
+          "properties": {
+            "kind": { "const": "PhysicalTerminal" },
+            "id": { "$ref": "#/$defs/IdClaim" },
+            "designation": { "$ref": "#/$defs/StringClaim" },
+            "function": { "$ref": "#/$defs/StringClaim" },
+            "electricalDomain": { "$ref": "#/$defs/DomainClaim" },
+            "direction": { "$ref": "#/$defs/DirectionClaim" },
+            "functionalPortRefs": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/IdClaim" }
+            },
+            "attributes": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Attribute" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Connector": {
+      "allOf": [
+        { "$ref": "#/$defs/EntityBase" },
+        {
+          "type": "object",
+          "required": ["id", "name", "type", "terminals"],
+          "properties": {
+            "kind": { "const": "Connector" },
+            "id": { "$ref": "#/$defs/IdClaim" },
+            "name": { "$ref": "#/$defs/StringClaim" },
+            "type": { "$ref": "#/$defs/StringClaim" },
+            "terminals": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/PhysicalTerminal" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "FunctionalUnit": {
+      "allOf": [
+        { "$ref": "#/$defs/EntityBase" },
+        {
+          "type": "object",
+          "required": ["id", "name", "type", "connectorRefs", "functionalPortRefs", "attributes"],
+          "properties": {
+            "kind": { "const": "FunctionalUnit" },
+            "id": { "$ref": "#/$defs/IdClaim" },
+            "name": { "$ref": "#/$defs/StringClaim" },
+            "type": { "$ref": "#/$defs/StringClaim" },
+            "connectorRefs": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/IdClaim" }
+            },
+            "functionalPortRefs": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/IdClaim" }
+            },
+            "attributes": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Attribute" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "DeviceClass": {
+      "allOf": [
+        { "$ref": "#/$defs/EntityBase" },
+        {
+          "type": "object",
+          "required": ["id", "name", "description", "functionalPorts"],
+          "properties": {
+            "kind": { "const": "DeviceClass" },
+            "id": { "$ref": "#/$defs/IdClaim" },
+            "name": { "$ref": "#/$defs/StringClaim" },
+            "description": { "$ref": "#/$defs/StringClaim" },
+            "functionalPorts": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/FunctionalPort" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "PartVariant": {
+      "allOf": [
+        { "$ref": "#/$defs/EntityBase" },
+        {
+          "type": "object",
+          "required": ["id", "manufacturer", "model", "deviceClassRef", "documentRevision", "description", "connectors", "functionalUnits", "attributes"],
+          "properties": {
+            "kind": { "const": "PartVariant" },
+            "id": { "$ref": "#/$defs/IdClaim" },
+            "manufacturer": { "$ref": "#/$defs/StringClaim" },
+            "model": { "$ref": "#/$defs/StringClaim" },
+            "deviceClassRef": { "$ref": "#/$defs/IdClaim" },
+            "documentRevision": { "$ref": "#/$defs/StringClaim" },
+            "description": { "$ref": "#/$defs/StringClaim" },
+            "connectors": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/Connector" }
+            },
+            "functionalUnits": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/FunctionalUnit" }
+            },
+            "attributes": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Attribute" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Payload": {
+      "type": "object",
+      "required": ["deviceClass", "partVariant"],
+      "properties": {
+        "deviceClass": { "$ref": "#/$defs/DeviceClass" },
+        "partVariant": { "$ref": "#/$defs/PartVariant" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

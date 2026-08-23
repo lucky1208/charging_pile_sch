@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="cache-control" content="no-store, no-cache, must-revalidate">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>充电桩电气原理图自动设计平台</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#111a2e; --panel2:#0d1626; --line:#1f2c48;
+    --text:#e6edf3; --text2:#8b9bb4; --cyan:#00f0ff; --blue:#58a6ff; --green:#3fb950;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI','Microsoft YaHei',sans-serif;font-size:14px}
+  header{display:flex;align-items:center;gap:14px;padding:14px 24px;border-bottom:1px solid var(--line);
+    background:linear-gradient(135deg,#0a1a33,#0d2240)}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#0a3d6b,#0a2d4b);
+    display:flex;align-items:center;justify-content:center;font-size:20px;border:1px solid rgba(0,240,255,.35)}
+  header h1{font-size:17px;font-weight:700}
+  header h1 span{color:var(--cyan)}
+  header .std{margin-left:auto;font-size:11px;color:var(--text2)}
+  .wrap{display:grid;grid-template-columns:380px 1fr;gap:16px;padding:16px 24px;max-width:1780px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h2{font-size:14px;margin-bottom:4px}
+  .card .desc{font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:12px}
+  .form-group{margin-bottom:10px}
+  .form-label{display:block;font-size:11px;color:var(--text2);margin-bottom:4px}
+  .form-input{width:100%;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    color:var(--text);font-size:13px;outline:none;font-family:inherit}
+  .form-input:focus{border-color:var(--cyan)}
+  select.form-input{cursor:pointer}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .section-title{font-size:11px;font-weight:700;color:#7fb8e8;margin:14px 0 8px;padding-bottom:5px;
+    border-bottom:1px solid var(--line);letter-spacing:.5px}
+  .btn-primary{width:100%;padding:12px;font-size:14px;font-weight:700;border-radius:10px;cursor:pointer;
+    background:linear-gradient(135deg,#0a4d8f,#0a3d6b);color:#fff;border:1px solid rgba(0,240,255,.4);margin-top:6px}
+  .btn-primary:hover{filter:brightness(1.15)}
+  .step-log{display:none;margin-top:12px;max-height:200px;overflow-y:auto;background:var(--panel2);
+    border:1px solid var(--line);border-radius:8px;padding:10px}
+  .step{font-size:11px;padding:2px 0;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .step.running{color:#7fb8e8}.step.ok{color:var(--green)}.step.warn{color:#e3b341}
+  .kpi-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}
+  .kpi-label{font-size:10px;color:var(--text2);margin-bottom:5px}
+  .kpi-value{font-size:14px;font-weight:700}
+  .warn-box{background:#3a2a10;border:1px solid #8a6a20;color:#e3b341;border-radius:8px;padding:8px 12px;
+    font-size:11px;margin-bottom:12px;line-height:1.6}
+  .diagram-box{background:#fff;border-radius:10px;border:1px solid var(--line);overflow:auto;max-height:80vh}
+  .diagram-box svg{display:block;max-width:none}
+  .diagram-actions{display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap}
+  .mini-btn{padding:6px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;color:var(--text2);
+    cursor:pointer;font-size:12px;font-family:inherit}
+  .mini-btn:hover{color:var(--cyan);border-color:var(--cyan)}
+  .state-box{background:#0d1a2d;border:1px solid #29466f;border-radius:9px;padding:10px 12px;font-size:11px;
+    line-height:1.65;margin-bottom:12px}
+  .state-box b{color:#7fb8e8}.state-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+  .state-tag{padding:2px 7px;border-radius:999px;font-size:10px;border:1px solid #34527c;color:#b7d5f4}
+  .state-tag.warn{border-color:#8a6a20;color:#e3b341}.state-tag.calc{border-color:#2f7d56;color:#78d8a4}
+  details.engine-inputs{margin:12px 0;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel2)}
+  details.engine-inputs summary{cursor:pointer;color:#b7d5f4;font-size:11px;font-weight:600}
+  .field-help{font-size:10px;color:var(--text2);line-height:1.55;margin-top:4px}
+  .review-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px}
+  .review-title{font-size:12px;font-weight:700;color:#58a6ff;margin-bottom:8px}
+  .requirement-confirm{display:flex;align-items:flex-start;gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line);font-size:11px;line-height:1.55;color:var(--text)}
+  .requirement-confirm input{margin-top:2px;accent-color:var(--cyan)}
+  footer{margin:24px;padding:12px;border-top:1px solid var(--line);font-size:11px;color:var(--text2);text-align:center;line-height:1.8}
+  @media (max-width:1100px){.wrap{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">⚡</div>
+  <h1><span>充电桩</span> 电气原理图自动设计平台</h1>
+  <div class="std">确定性选型引擎 + sch_lib 绘图规则 · 方案级自动原理图 · 专业校核与型式试验必需</div>
+</header>
+
+<div class="wrap">
+  <!-- ============ 左: 充电桩设计参数 ============ -->
+  <div class="card">
+    <h2>⚡ 充电桩设计</h2>
+    <div class="desc">填写充电标准、功率、枪数与储能配置后，平台按确定性算法选取功率模块、开关、接触器、快熔、传感器、电池簇与变换器档位，并自动生成 A3 充电桩电气原理图。AI 仅用于自然语言需求翻译，不参与任何计算与出图。</div>
+
+    <div class="section-title">基本信息</div>
+    <div class="form-group"><label class="form-label">桩名称 / 项目</label>
+      <input type="text" class="form-input" id="f-name" value="充电桩"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">站点</label>
+        <input type="text" class="form-input" id="f-site" value=""></div>
+      <div class="form-group"><label class="form-label">桩型</label>
+        <select class="form-input" id="f-archetype">
+          <option value="dc-integrated" selected>直流一体式</option>
+          <option value="dc-split" disabled>直流分体式（规划中，暂不生成）</option>
+          <option value="ac-dc-combo" disabled>交直流一体桩（规划中，暂不生成）</option>
+          <option value="ess-mobile" disabled>储能移动充电桩（规划中，暂不生成）</option>
+        </select></div>
+    </div>
+
+    <div class="section-title">充电标准与接口</div>
+    <div class="form-group"><label class="form-label">充电桩类型（标准 / 接口 / 通信）</label>
+      <select class="form-input" id="f-standard">
+        <option value="gb" selected>国标 GB/T — GB/T 20234.3 接口 + GB/T 27930 CAN</option>
+        <option value="eu">欧标 CCS2 — IEC 62196-3 FF + DIN 70121 / ISO 15118</option>
+        <option value="us">美标 CCS1 — IEC 62196-3 EE + SAE J1772 / ISO 15118</option>
+        <option value="nacs" disabled>美标 NACS — 已识别，端子模型验证中</option>
+        <option value="chademo" disabled>日标 CHAdeMO — 已识别，端子模型验证中</option>
+      </select>
+      <div class="field-help" id="std-help"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">充电枪数量</label>
+        <select class="form-input" id="f-guns">
+          <option value="1">1 把（单枪独占功率）</option>
+          <option value="2" selected>2 把（功率动态分配）</option>
+          <option value="3">3 把</option>
+          <option value="4">4 把（一机多充）</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">单枪最大电流 (A)</label>
+        <select class="form-input" id="f-gun-current">
+          <option value="125">125A 常规风冷枪线</option>
+          <option value="200">200A 常规风冷枪线</option>
+          <option value="250" selected>250A 常规风冷枪线</option>
+          <option value="300">300A 液冷枪线</option>
+          <option value="400">400A 液冷枪线</option>
+        </select></div>
+    </div>
+
+    <div class="section-title">功率与电气规格</div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">总输出功率 (kW)</label>
+        <input type="number" class="form-input" id="f-output" value="120" min="20" step="10"></div>
+      <div class="form-group"><label class="form-label">单模块功率 (kW)</label>
+        <select class="form-input" id="f-module">
+          <option value="15">15kW</option>
+          <option value="20">20kW</option>
+          <option value="30">30kW</option>
+          <option value="40" selected>40kW</option>
+          <option value="60">60kW 液冷</option>
+        </select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">输出电压范围</label>
+        <select class="form-input" id="f-window">
+          <option value="200-750">200–750V</option>
+          <option value="150-1000">150–1000V</option>
+          <option value="200-1000" selected>200–1000V</option>
+          <option value="500-1000">500–1000V 高压平台</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">交流输入电压 (V)</label>
+        <select class="form-input" id="f-acv">
+          <option value="380">AC 380V 3P+N+PE</option>
+          <option value="400">AC 400V 3P+N+PE</option>
+          <option value="480">AC 480V 3P+PE</option>
+        </select></div>
+    </div>
+    <div class="form-group"><label class="form-label">供电方式</label>
+      <select class="form-input" id="f-supply">
+        <option value="grid">市电低压直供</option>
+        <option value="transformer" selected>专用变压器供电</option>
+        <option value="offgrid">储能离网为主 + 市电补电</option>
+      </select></div>
+
+    <div class="section-title">储能配置</div>
+    <div class="form-group"><label class="form-label">是否带储能</label>
+      <select class="form-input" id="f-ess">
+        <option value="1">带储能（削峰填谷 / 降低进线容量）</option>
+        <option value="0" selected>不带储能（全部功率由电网承担）</option>
+      </select></div>
+    <div id="ess-fields">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">储能电池容量 (kWh)</label>
+          <input type="number" class="form-input" id="f-ess-kwh" value="200" min="20" step="10"></div>
+        <div class="form-group"><label class="form-label">变换器功率 (kW)</label>
+          <input type="number" class="form-input" id="f-ess-power" value="120" min="10" step="10"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">电池类型</label>
+          <select class="form-input" id="f-ess-chem">
+            <option value="lfp" selected>磷酸铁锂 LFP</option>
+            <option value="nmc">三元 NMC</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">耦合方式</label>
+          <select class="form-input" id="f-ess-coupling">
+            <option value="dc" selected>直流侧耦合（DC/DC）</option>
+            <option value="ac">交流侧耦合（PCS）</option>
+          </select></div>
+      </div>
+      <div class="field-help">直流耦合转换级数少、效率高；交流耦合可并网/离网切换并兼容既有交流配电。并网批复、防孤岛与消防要求均须另行确认。</div>
+    </div>
+
+    <details class="engine-inputs">
+      <summary>二次系统、热管理与工程边界（建议项目阶段补齐）</summary>
+      <div class="field-help">未填项目资料时，引擎按明确标注的概念假设取值；这些输入不能替代短路、保护配合、EMC、温升或消防计算书。</div>
+      <div class="form-row" style="margin-top:9px">
+        <div class="form-group"><label class="form-label">热管理方式</label>
+          <select class="form-input" id="f-thermal">
+            <option value="air">风冷（轴流风机 + 滤网）</option>
+            <option value="liquid" selected>液冷（模块液冷机组）</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">防护等级</label>
+          <select class="form-input" id="f-ip">
+            <option value="IP54" selected>IP54</option>
+            <option value="IP55">IP55</option>
+            <option value="IP65">IP65</option>
+          </select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">工作温度</label>
+          <input type="text" class="form-input" id="f-ambient" value=""></div>
+        <div class="form-group"><label class="form-label">后台协议</label>
+          <select class="form-input" id="f-backend">
+            <option value="ocpp16">OCPP 1.6J</option>
+            <option value="ocpp201">OCPP 2.0.1</option>
+            <option value="private">运营商私有协议</option>
+          </select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">显示屏尺寸</label>
+          <select class="form-input" id="f-hmi">
+            <option value="7 英寸">7 英寸</option>
+            <option value="10 英寸" selected>10 英寸</option>
+            <option value="15 英寸">15 英寸</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">支付与鉴权</label>
+          <select class="form-input" id="f-pay">
+            <option value="扫码 / 刷卡" selected>扫码 + 刷卡</option>
+            <option value="扫码">仅扫码</option>
+            <option value="刷卡 / 即插即充">刷卡 + 即插即充</option>
+          </select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">模块效率（概念值）</label>
+          <input type="number" class="form-input" id="f-eff" value="0.95" min="0.85" max="0.99" step="0.01"></div>
+        <div class="form-group"><label class="form-label">输入功率因数</label>
+          <input type="number" class="form-input" id="f-pf" value="0.99" min="0.8" max="1" step="0.01"></div>
+      </div>
+      <div class="form-group"><label class="form-label">低温加热</label>
+        <select class="form-input" id="f-lowtemp">
+          <option value="0" selected>不配置</option>
+          <option value="1">配置加热/除湿回路</option>
+        </select></div>
+    </details>
+
+    <div class="section-title">需求翻译（可选）</div>
+    <div class="form-group"><label class="form-label">AI 提供方</label>
+      <select class="form-input" id="f-model">
+        <option value="local" selected>本地规则解析（不发送文本）</option>
+        <option value="kimi">Kimi（服务端代理）</option>
+        <option value="deepseek">DeepSeek（服务端代理）</option>
+        <option value="glm">GLM（服务端代理）</option>
+      </select>
+      <div class="field-help" id="ai-provider-status">正在检查服务端 AI 可用性…</div>
+    </div>
+    <div class="form-group"><label class="form-label">💡 自然语言需求</label>
+      <textarea class="form-input" id="f-nl" rows="3" style="resize:vertical"
+        placeholder="例：欧标双枪 240kW 液冷超充，带 215kWh 储能直流耦合，OCPP 2.0.1，室外 IP55"></textarea>
+      <div class="field-help">不填则使用表单。选择服务端 AI 时仅发送此处文本用于参数翻译；请勿填写密钥、客户身份或其他敏感信息。服务端未配置时自动退回本地规则解析。</div>
+    </div>
+    <div class="form-group"><label class="form-label">选型偏好</label>
+      <select class="form-input" id="f-pref">
+        <option value="balance" selected>均衡（性价比）</option>
+        <option value="cost">成本优先</option>
+        <option value="reliability">可靠性优先</option>
+      </select></div>
+
+    <div class="review-box" id="requirement-review" style="display:none">
+      <div class="review-title">需求翻译复核</div>
+      <div id="requirement-review-detail" style="font-size:11px;line-height:1.65;white-space:pre-wrap;color:var(--text2)"></div>
+      <label class="requirement-confirm" id="requirement-confirm-row" style="display:none">
+        <input type="checkbox" id="f-requirement-confirm">
+        <span>我已对照原始需求复核回填参数和未决项，并明确确认以当前表单值继续生成。</span>
+      </label>
+    </div>
+
+    <button class="btn-primary" onclick="generateSchematic()">⚡ 生成充电桩原理图</button>
+    <div class="step-log" id="step-log"></div>
+  </div>
+
+  <!-- ============ 右: 原理图 ============ -->
+  <div>
+    <div id="empty-hint" style="padding:80px 20px;text-align:center;color:var(--text2)">
+      <div style="font-size:44px;margin-bottom:12px">🔌</div>
+      <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">请先在左侧填写充电桩参数</div>
+      <div style="font-size:12px">点击「生成充电桩原理图」后，此处展示自动选型结果与 A3 电气原理图</div>
+    </div>
+    <div id="result-area" style="display:none">
+      <div class="kpi-grid" id="summary-cards"></div>
+      <div id="warn-box"></div>
+      <div id="design-status"></div>
+      <div class="diagram-actions">
+        <button class="mini-btn" onclick="downloadSvg()">⬇ 下载 SVG</button>
+        <button class="mini-btn" onclick="downloadDxf()">⬇ 下载 DXF 草图</button>
+        <button class="mini-btn" onclick="downloadJson()">⬇ 下载方案 JSON</button>
+        <button class="mini-btn" onclick="reviewDiagram()">🧪 图纸前置检查</button>
+        <span style="width:1px;height:16px;background:var(--line)"></span>
+        <button class="mini-btn" onclick="zoomOut()">➖</button>
+        <span id="zoom-label" style="font-size:11px;color:var(--text2);min-width:42px;text-align:center">适宽</span>
+        <button class="mini-btn" onclick="zoomIn()">➕</button>
+        <button class="mini-btn" onclick="zoomFitWidth()">↔ 适宽</button>
+        <button class="mini-btn" onclick="zoomFitSheet()">▣ 适页</button>
+        <span style="font-size:11px;color:var(--text2)">A3 方案级图框 · DXF 为可编辑概念草图 · 生产图须由专业人员校核并签发</span>
+      </div>
+      <div class="diagram-box" id="d-pile"></div>
+      <div id="review-host"></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  确定性选型引擎 · 图纸采用 IEC 61082 / IEC 60617 / GB/T 4728 的项目化基线表达，具体适用标准、符号库与图框应由项目确认<br>
+  本平台输出为方案级自动原理图，不构成标准符合性证明、保护整定书、型式试验结论或设备报价；生产/施工图须由具备相应资格的专业人员校核、深化与签发
+</footer>
+
+<script src="js/engine-bundle.js?v=sha256-9a6141463564c92107bee60df4a331f8f9bbef9c2eb461f410fdd3355e0cc105" data-generated-bundle-hash="sha256-9a6141463564c92107bee60df4a331f8f9bbef9c2eb461f410fdd3355e0cc105"></script>
+<script src="js/app.js?v=sha256-f6ecef2e6bc6ba3d92cfb195648fe80160dd6ea38680a90a48cd786af256fda8" data-generated-app-hash="sha256-f6ecef2e6bc6ba3d92cfb195648fe80160dd6ea38680a90a48cd786af256fda8"></script>
+</body>
+</html>

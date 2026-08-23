@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/evse/component-record.schema.json",
+  "title": "Immutable EVSE component catalog revision envelope",
+  "description": "Persisted records are additionally validated field-by-field, reference-by-reference and evidence-by-evidence by lib/validator.js. Hydrated evidence contains sourceSha256, documentVersion, sourceFile and quoteSha256.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "recordId",
+    "revision",
+    "state",
+    "createdAt",
+    "actor",
+    "previousRevisionSha256",
+    "change",
+    "source",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "evse.component-record/v1" },
+    "recordId": { "type": "string", "pattern": "^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:[._-]|$))[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": { "enum": ["EXTRACTED_DRAFT", "REVIEWED", "APPROVED", "DEPRECATED"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "actor": { "type": "string", "minLength": 1, "maxLength": 320 },
+    "previousRevisionSha256": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      ]
+    },
+    "change": {
+      "type": "object",
+      "required": ["action", "reason"],
+      "properties": {
+        "action": { "enum": ["EXTRACT", "REVIEW", "APPROVE", "DEPRECATE"] },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["fileName", "mediaType", "sha256", "documentVersion", "extraction"],
+      "properties": {
+        "fileName": { "type": "string", "minLength": 1 },
+        "mediaType": { "enum": ["text/plain", "application/json", "application/pdf"] },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "documentVersion": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "extraction": {
+          "type": "object",
+          "required": ["mode", "extractorId", "extractorVersion", "outputSha256", "safety"],
+          "properties": {
+            "mode": { "enum": ["PLAIN_TEXT", "JSON_DATA", "EXTERNAL_TEXT_FILE", "CALLER_CALLBACK"] },
+            "extractorId": { "type": "string", "minLength": 1 },
+            "extractorVersion": { "type": "string", "minLength": 1 },
+            "outputSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "safety": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "payload": {
+      "type": "object",
+      "required": ["deviceClass", "partVariant"],
+      "properties": {
+        "deviceClass": { "type": "object" },
+        "partVariant": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "x-runtime-invariants": [
+    "Every semantic entity and claim has confidence and one or more hydrated evidence locators",
+    "Every evidence sourceSha256/documentVersion equals the revision source",
+    "FunctionalPort and PhysicalTerminal references are bidirectional",
+    "Revision files and SHA-256 sidecars form an append-only hash chain",
+    "Only the exact lifecycle sequence is accepted",
+    "Each lifecycle action actor is distinct from all prior lifecycle actors"
+  ]
+}

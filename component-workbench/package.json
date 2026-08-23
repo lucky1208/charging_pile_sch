@@ -1,0 +1,13 @@
+{
+  "name": "evse-component-catalog-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Safe, append-only EVSE component catalog extraction and approval workbench",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
