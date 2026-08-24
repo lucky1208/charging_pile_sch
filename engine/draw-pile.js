@@ -23,6 +23,16 @@ window.drawPile = function drawPile(result) {
   R.drawingIR = compiled.drawingIR;
   R.drawingPlan = compiled.plan;
   R.drawingPages = compiled.sheets;
+  R.drawingSheet = compiled.plan.sheet;
+  R.drawingDocumentControl = Object.freeze({
+    source: 'EVSE_SCHEMATIC_PLACEMENT',
+    format: compiled.plan.sheet && compiled.plan.sheet.format,
+    orientation: compiled.plan.sheet && compiled.plan.sheet.orientation,
+    widthMm: compiled.plan.sheet && compiled.plan.sheet.widthMm,
+    heightMm: compiled.plan.sheet && compiled.plan.sheet.heightMm,
+    scale: compiled.plan.sheet && compiled.plan.sheet.scale,
+    page: Object.freeze({ current: 1, total: compiled.sheets.length || 1 })
+  });
   R.drawingGeometryHash = window.EVSE_DRAWING_IR.drawingIRHash(compiled.drawingIR);
   return renderer.render(compiled, R);
 };

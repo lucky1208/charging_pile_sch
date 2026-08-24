@@ -192,6 +192,10 @@
     if (requirement.moduleKw && optionExists($('f-module'), String(Math.round(requirement.moduleKw)))) setAutomatedValue('f-module', String(Math.round(requirement.moduleKw)), source);
     if (requirement.essEnabled === true) setAutomatedValue('f-ess', '1', source);
     if (requirement.essEnabled === false) setAutomatedValue('f-ess', '0', source);
+    if (requirement.archetype === 'ess-mobile' && requirement.essEnabled !== false) {
+      setAutomatedValue('f-ess', '1', source);
+      setAutomatedValue('f-supply', 'offgrid', source);
+    }
     if (requirement.essKwh) setAutomatedValue('f-ess-kwh', Math.round(requirement.essKwh), source);
     if (requirement.essPowerKw) setAutomatedValue('f-ess-power', Math.round(requirement.essPowerKw), source);
     if (requirement.essCoupling && optionExists($('f-ess-coupling'), requirement.essCoupling)) setAutomatedValue('f-ess-coupling', requirement.essCoupling, source);
@@ -624,6 +628,15 @@
       input.addEventListener('change', clear);
     });
     $('f-ess').addEventListener('change', toggleEssFields);
+    $('f-archetype').addEventListener('change', () => {
+      if ($('f-archetype').value === 'ess-mobile') {
+        $('f-ess').value = '1';
+        $('f-supply').value = 'offgrid';
+        delete state.automatedInputSources['f-ess'];
+        delete state.automatedInputSources['f-supply'];
+      }
+      toggleEssFields();
+    });
     $('f-standard').addEventListener('change', () => {
       updateStandardHelp();
       const voltage = REQUIREMENTS && REQUIREMENTS.STANDARD_VOLTAGES[$('f-standard').value];

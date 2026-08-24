@@ -3,6 +3,9 @@
   "framework": null,
   "buildCommand": "npm run build",
   "outputDirectory": "web",
+  "functions": {
+    "api/ai.js": { "maxDuration": 30 }
+  },
   "cleanUrls": true,
   "trailingSlash": false,
   "headers": [

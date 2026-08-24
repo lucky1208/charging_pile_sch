@@ -1,5 +1,5 @@
 /* ============================================================
- * Renderer-neutral Drawing IR -> SVG A3 preview
+ * Renderer-neutral Drawing IR -> automatically sized SVG preview
  * ------------------------------------------------------------
  * All electrical geometry comes from EVSE Drawing IR.  This renderer may
  * style a primitive, but it never creates a connection or changes a route.
@@ -13,7 +13,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
 
   class SvgIRRenderError extends Error {
     constructor(code, message, details) {
@@ -59,7 +59,26 @@
       ' data-circuit="' + attr(S, route.circuitId) + '"' +
       ' data-from="' + attr(S, route.source.ref) + '"' +
       ' data-to="' + attr(S, route.target.ref) + '"' +
+      ' data-physical-from="' + attr(S, route.source.physicalRef || route.source.ref) + '"' +
+      ' data-physical-to="' + attr(S, route.target.physicalRef || route.target.ref) + '"' +
       ' data-layer="' + attr(S, route.layer) + '"';
+  }
+
+  function renderAliasTraces(S, ir) {
+    let out = '<metadata id="EVSE-IR-ALIAS-TRACES" data-alias-trace-count="' +
+      number((ir.aliasTraces || []).length) + '">';
+    (ir.aliasTraces || []).slice().sort((a, b) => compareText(a.id, b.id)).forEach((trace) => {
+      out += '<metadata id="ALIAS-TRACE-' + attr(S, trace.circuitId) + '"' +
+        ' data-alias-trace="' + attr(S, trace.id) + '"' +
+        ' data-alias-reason="' + attr(S, trace.reason) + '"' +
+        ' data-net="' + attr(S, trace.netId) + '"' +
+        ' data-circuit="' + attr(S, trace.circuitId) + '"' +
+        ' data-from="' + attr(S, trace.source.ref) + '"' +
+        ' data-to="' + attr(S, trace.target.ref) + '"' +
+        ' data-physical-from="' + attr(S, trace.physicalSource.ref) + '"' +
+        ' data-physical-to="' + attr(S, trace.physicalTarget.ref) + '"/>';
+    });
+    return out + '</metadata>';
   }
 
   function lineElement(S, route, style, x1, y1, x2, y2) {
@@ -167,41 +186,111 @@
     return out;
   }
 
-  function renderDevice(S, device) {
-    const box = device.bbox;
-    const title = device.label || device.tag || device.id;
-    const fill = S.C.fill && (device.system === 'ess' ? S.C.fill.ess
-      : device.system === 'control' || device.system === 'safety' ? S.C.fill.ctl
-        : device.system === 'aux' || device.system === 'thermal' ? S.C.fill.aux
-          : device.system === 'ac' ? S.C.fill.ac : S.C.fill.dc);
+  function equipmentAttributes(S, primitive) {
+    return ' data-primitive="' + attr(S, primitive.id) + '"' +
+      ' data-equipment="' + attr(S, primitive.equipmentId) + '"' +
+      (primitive.symbolId ? ' data-symbol="' + attr(S, primitive.symbolId) + '"' : '') +
+      (primitive.symbolRole ? ' data-symbol-role="' + attr(S, primitive.symbolRole) + '"' : '') +
+      (primitive.endpointRef ? ' data-endpoint="' + attr(S, primitive.endpointRef) + '"' : '') +
+      (primitive.terminalId ? ' data-terminal="' + attr(S, primitive.terminalId) + '"' : '');
+  }
+
+  function primitivePaint(S, primitive) {
+    const fill = primitive.fill === 'ink' ? S.C.ink : primitive.fill === 'paper' ? '#ffffff' :
+      primitive.fill && primitive.fill !== 'none' ? primitive.fill : 'none';
+    const stroke = primitive.stroke === 'none' || primitive.kind === 'text' ? 'none' :
+      (primitive.stroke || S.C.ink);
+    const width = primitive.strokeWidth == null ? 1.1 : primitive.strokeWidth;
+    return ' fill="' + attr(S, fill) + '" stroke="' + attr(S, stroke) + '" stroke-width="' +
+      number(width) + '" stroke-linecap="round" stroke-linejoin="round"' +
+      (primitive.dash ? ' stroke-dasharray="' + attr(S, primitive.dash) + '"' : '');
+  }
+
+  function arcPath(primitive) {
+    const startAngle = Number(primitive.startAngle) * Math.PI / 180;
+    const endAngle = Number(primitive.endAngle) * Math.PI / 180;
+    const delta = ((Number(primitive.endAngle) - Number(primitive.startAngle)) % 360 + 360) % 360;
+    const startX = Number(primitive.x) + Number(primitive.radius) * Math.cos(startAngle);
+    const startY = Number(primitive.y) + Number(primitive.radius) * Math.sin(startAngle);
+    const endX = Number(primitive.x) + Number(primitive.radius) * Math.cos(endAngle);
+    const endY = Number(primitive.y) + Number(primitive.radius) * Math.sin(endAngle);
+    return 'M' + number(startX) + ',' + number(startY) + ' A' + number(primitive.radius) + ',' +
+      number(primitive.radius) + ' 0 ' + (delta > 180 ? '1' : '0') + ',1 ' + number(endX) + ',' + number(endY);
+  }
+
+  function renderEquipmentPrimitive(S, primitive) {
+    const kind = String(primitive.kind || '').toLowerCase();
+    const trace = equipmentAttributes(S, primitive);
+    const paint = primitivePaint(S, primitive);
+    if (kind === 'line') {
+      return '<line x1="' + number(primitive.x1) + '" y1="' + number(primitive.y1) +
+        '" x2="' + number(primitive.x2) + '" y2="' + number(primitive.y2) + '"' + paint + trace + '/>';
+    }
+    if (kind === 'polyline') {
+      const tag = primitive.closed ? 'polygon' : 'polyline';
+      const points = (primitive.points || []).map((point) => number(point.x) + ',' + number(point.y)).join(' ');
+      return '<' + tag + ' points="' + points + '"' + paint + trace + '/>';
+    }
+    if (kind === 'circle') {
+      return '<circle cx="' + number(primitive.x) + '" cy="' + number(primitive.y) +
+        '" r="' + number(primitive.radius) + '"' + paint + trace + '/>';
+    }
+    if (kind === 'arc') {
+      return '<path d="' + arcPath(primitive) + '"' + paint + trace + '/>';
+    }
+    if (kind === 'rect') {
+      return '<rect x="' + number(primitive.x) + '" y="' + number(primitive.y) +
+        '" width="' + number(primitive.width) + '" height="' + number(primitive.height) + '"' +
+        paint + trace + '/>';
+    }
+    if (kind === 'text') {
+      const anchor = ['start', 'middle', 'end'].includes(primitive.anchor) ? primitive.anchor : 'middle';
+      const rotation = Number(primitive.rotation || 0);
+      return '<text x="' + number(primitive.x) + '" y="' + number(primitive.y) +
+        '" font-family="Arial,Microsoft YaHei,sans-serif" font-size="' + number(primitive.height || 4) +
+        '" font-weight="' + attr(S, primitive.weight || 'normal') + '" text-anchor="' + anchor +
+        '" dominant-baseline="middle" fill="' + S.C.ink + '" stroke="none"' +
+        (rotation ? ' transform="rotate(' + number(rotation) + ' ' + number(primitive.x) + ' ' + number(primitive.y) + ')"' : '') +
+        trace + '>' + attr(S, primitive.text) + '</text>';
+    }
+    if (kind === 'port') {
+      return '<circle cx="' + number(primitive.x) + '" cy="' + number(primitive.y) +
+        '" r="1.55" fill="#ffffff" stroke="' + S.C.ink + '" stroke-width="0.8"' + trace + '/>';
+    }
+    throw new SvgIRRenderError('DRAWING_IR_PRIMITIVE_UNSUPPORTED',
+      'Unsupported equipment primitive kind ' + kind + '.', { primitiveId: primitive.id, kind });
+  }
+
+  function renderDevice(S, device, primitives) {
     let out = '<g id="DEVICE-' + attr(S, device.id) + '" data-equipment="' + attr(S, device.id) +
-      '" data-device-kind="' + attr(S, device.type) + '" data-layer="EVSE-EQPT">';
-    out += '<rect x="' + number(box.xMin) + '" y="' + number(box.yMin) + '" width="' + number(box.width) +
-      '" height="' + number(box.height) + '" rx="3" fill="' + (fill || '#f8fafc') +
-      '" stroke="' + S.C.ink + '" stroke-width="1.3" data-equipment="' + attr(S, device.id) + '"/>';
-    out += S.txt(box.xMin + box.width / 2, box.yMin + 13, S.clip(title, 8, box.width - 8), 8,
-      S.C.ink, 'middle', 'bold');
-    out += S.txt(box.xMin + box.width / 2, box.yMin + 24, S.clip(device.type, 6, box.width - 8), 6,
-      S.C.anno, 'middle');
-    const shown = new Set();
-    (device.ports || []).forEach((port) => {
-      out += '<circle cx="' + number(port.x) + '" cy="' + number(port.y) +
-        '" r="1.8" fill="#ffffff" stroke="' + S.C.ink + '" stroke-width="0.8"' +
-        ' data-equipment="' + attr(S, device.id) + '" data-terminal="' + attr(S, port.terminalId) +
-        '" data-endpoint="' + attr(S, port.ref) + '"/>';
-      if (shown.has(port.terminalId)) return;
-      shown.add(port.terminalId);
-      const left = port.side === 'LEFT';
-      const labelX = left ? box.xMin + 5 : box.xMax - 5;
-      out += S.txt(labelX, port.y - 2.2, S.clip(port.label || port.terminalId, 5.2, box.width * 0.42),
-        5.2, S.C.ink, left ? 'start' : 'end');
-    });
-    out += '</g>';
-    return out;
+      '" data-device-kind="' + attr(S, device.type) + '" data-symbol="' + attr(S, device.symbolId) +
+      '" data-symbol-fallback="' + (device.symbolFallback ? 'true' : 'false') + '" data-layer="EVSE-EQPT">';
+    primitives.forEach((primitive) => { out += renderEquipmentPrimitive(S, primitive); });
+    return out + '</g>';
   }
 
   function renderDevices(S, ir) {
-    return '<g id="EVSE-IR-DEVICES">' + (ir.devices || []).map((device) => renderDevice(S, device)).join('') + '</g>';
+    const equipment = new Map();
+    (ir.primitives || []).forEach((primitive) => {
+      if (!primitive.equipmentId) return;
+      const list = equipment.get(primitive.equipmentId) || [];
+      list.push(primitive);
+      equipment.set(primitive.equipmentId, list);
+    });
+    let out = '<g id="EVSE-IR-DEVICES">';
+    (ir.devices || []).forEach((device) => {
+      const primitives = (equipment.get(device.id) || []).slice().sort((a, b) => compareText(a.id, b.id));
+      out += renderDevice(S, device, primitives);
+    });
+    return out + '</g>';
+  }
+
+  function renderAnnotations(S, ir) {
+    let out = '<g id="EVSE-IR-ANNOTATIONS" data-layer="EVSE-ANNO">';
+    (ir.annotations || []).slice().sort((a, b) => compareText(a.id, b.id)).forEach((primitive) => {
+      out += renderEquipmentPrimitive(S, primitive);
+    });
+    return out + '</g>';
   }
 
   function instanceSpec(instance) {
@@ -271,17 +360,28 @@
       'EDEM ' + String(design.schemaVersion || ''),
       '图模覆盖 ' + (ir.coverage && ir.coverage.ok ? 'PASS' : 'BLOCKED')
     ].filter(Boolean).join(' | ');
-    const doc = S.documentMeta(result, 'ev-schematic', {
-      designer: S.clip((result && result.inputs && result.inputs.designer) || '自动生成（待校核）', 9, 120),
-      page: { current: 1, total: (compiled.sheets || []).length || 1 }
-    });
     const rowsForSchedule = scheduleRows(compiled);
     const scheduleTop = plan.schedule.y + 20;
     /* Three wrapped specification lines are possible, so reserve the full
-       deterministic worst-case row height before opening the A3 viewBox. */
+       deterministic worst-case row height before opening the selected viewBox. */
     const scheduleBottomEstimate = scheduleTop + 20 + rowsForSchedule.length * 32;
     const width = Math.max(1680, Math.ceil(plan.width));
     const height = Math.max(1188, Math.ceil(plan.height), Math.ceil(scheduleBottomEstimate + 340));
+    const plannedSheet = plan.sheet || {
+      format: 'CUSTOM', orientation: width >= height ? 'LANDSCAPE' : 'PORTRAIT',
+      widthMm: Math.ceil(width / 4), heightMm: Math.ceil(height / 4), scale: '1:4'
+    };
+    const doc = S.documentMeta(result, 'ev-schematic', {
+      designer: S.clip((result && result.inputs && result.inputs.designer) || '自动生成（待校核）', 9, 120),
+      page: { current: 1, total: (compiled.sheets || []).length || 1 },
+      scale: plannedSheet.scale || '1:4',
+      sheet: {
+        format: plannedSheet.format,
+        orientation: plannedSheet.orientation,
+        widthMm: plannedSheet.widthMm,
+        heightMm: plannedSheet.heightMm
+      }
+    });
     let svg = S.svgOpen(width, height, title, subtitle, doc);
     svg = rootAttribute(svg, 'data-ir-schema', ir.schema, S);
     /* drawPile computes this hash immediately before this synchronous render.
@@ -291,8 +391,17 @@
     svg = rootAttribute(svg, 'data-geometry-hash', geometryHash, S);
     svg = rootAttribute(svg, 'data-coverage-status', ir.coverage && ir.coverage.ok ? 'PASS' : 'BLOCKED', S);
     svg = rootAttribute(svg, 'data-route-count', ir.routes.length, S);
+    svg = rootAttribute(svg, 'data-alias-trace-count', (ir.aliasTraces || []).length, S);
+    svg = rootAttribute(svg, 'data-sheet-format-actual', plannedSheet.format, S);
+    svg = rootAttribute(svg, 'data-sheet-width-mm', plannedSheet.widthMm, S);
+    svg = rootAttribute(svg, 'data-sheet-height-mm', plannedSheet.heightMm, S);
+    svg = rootAttribute(svg, 'data-plot-scale', plannedSheet.scale || '1:4', S);
+    svg = rootAttribute(svg, 'data-terminal-pitch-min', plan.readability && plan.readability.terminalPitchMin || '', S);
+    svg = rootAttribute(svg, 'data-route-lane-pitch-min', plan.readability && plan.readability.routeLanePitchMin || '', S);
     svg += S.watermark(width, height, result && result.inputs && result.inputs.watermarkText || '方案草案');
     svg += '<g id="EVSE-DRAWING-IR" data-ir-schema="' + attr(S, ir.schema) + '">';
+    svg += renderAliasTraces(S, ir);
+    svg += renderAnnotations(S, ir);
     svg += renderRoutes(S, ir);
     svg += renderMarkers(S, ir);
     svg += renderDevices(S, ir);

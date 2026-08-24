@@ -53,7 +53,7 @@ function fixture() {
 function runtime() {
   const win = {};
   [
-    'color-scheme.js', 'symbols.js', 'drawing-ir.js', 'schematic-placement.js',
+    'color-scheme.js', 'symbols.js', 'iec-symbol-catalog.js', 'drawing-ir.js', 'schematic-placement.js',
     'svg-ir-renderer.js', 'draw-pile.js'
   ].forEach((file) => load(win, file));
   return win;
@@ -95,4 +95,3 @@ test('coverage mutation fails closed before SVG rendering', () => {
   assert.throws(() => win.drawPile({ design, inputs: {} }), (error) =>
     error && (error.code === 'SCHEMATIC_GEOMETRY_BLOCKED' || error.code === 'SCHEMATIC_MODEL_INCOMPLETE'));
 });
-

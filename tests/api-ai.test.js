@@ -178,6 +178,41 @@ test('parse response is allowlisted, typed, confidence-gated and carries server 
   }
 });
 
+test('parse accepts all five standards and all four archetypes without remapping', async () => {
+  const oldFetch = global.fetch;
+  const standards = ['gb', 'eu', 'us', 'nacs', 'chademo'];
+  const archetypes = ['dc-integrated', 'dc-split', 'ac-dc-combo', 'ess-mobile'];
+  let current = null;
+  try {
+    await withDeepseekKey(async () => {
+      global.fetch = async () => modelResponse(JSON.stringify({
+        standard: current.standard,
+        archetype: current.archetype,
+        confidence: 0.95
+      }));
+      const handler = freshHandler();
+      for (const standard of standards) {
+        for (const archetype of archetypes) {
+          current = { standard, archetype };
+          const res = await invoke(handler, {
+            body: {
+              action: 'parse',
+              provider: 'deepseek',
+              text: `${standard} ${archetype}`
+            },
+            ip: '203.0.113.40'
+          });
+          assert.equal(res.statusCode, 200, `${standard}/${archetype}`);
+          assert.equal(res.payload.data.standard, standard);
+          assert.equal(res.payload.data.archetype, archetype);
+        }
+      }
+    });
+  } finally {
+    global.fetch = oldFetch;
+  }
+});
+
 test('invalid model types do not become high-confidence requirements', async () => {
   const oldFetch = global.fetch;
   try {

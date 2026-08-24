@@ -89,9 +89,9 @@
       <div class="form-group"><label class="form-label">桩型</label>
         <select class="form-input" id="f-archetype">
           <option value="dc-integrated" selected>直流一体式</option>
-          <option value="dc-split" disabled>直流分体式（规划中，暂不生成）</option>
-          <option value="ac-dc-combo" disabled>交直流一体桩（规划中，暂不生成）</option>
-          <option value="ess-mobile" disabled>储能移动充电桩（规划中，暂不生成）</option>
+          <option value="dc-split">直流分体式（功率柜 + 充电终端）</option>
+          <option value="ac-dc-combo">交流一体式（AC + DC 双输出）</option>
+          <option value="ess-mobile">储能移动充电桩（电池主供 + 多路径补电）</option>
         </select></div>
     </div>
 
@@ -101,8 +101,8 @@
         <option value="gb" selected>国标 GB/T — GB/T 20234.3 接口 + GB/T 27930 CAN</option>
         <option value="eu">欧标 CCS2 — IEC 62196-3 FF + DIN 70121 / ISO 15118</option>
         <option value="us">美标 CCS1 — IEC 62196-3 EE + SAE J1772 / ISO 15118</option>
-        <option value="nacs" disabled>美标 NACS — 已识别，端子模型验证中</option>
-        <option value="chademo" disabled>日标 CHAdeMO — 已识别，端子模型验证中</option>
+        <option value="nacs">美标 NACS / SAE J3400 — PLC + CP/PP</option>
+        <option value="chademo">日标 CHAdeMO — CAN + 独立启停/使能回路</option>
       </select>
       <div class="field-help" id="std-help"></div>
     </div>
@@ -121,6 +121,7 @@
           <option value="250" selected>250A 常规风冷枪线</option>
           <option value="300">300A 液冷枪线</option>
           <option value="400">400A 液冷枪线</option>
+          <option value="500">500A 液冷枪线（连接器型式专项确认）</option>
         </select></div>
     </div>
 
@@ -310,7 +311,7 @@
   本平台输出为方案级自动原理图，不构成标准符合性证明、保护整定书、型式试验结论或设备报价；生产/施工图须由具备相应资格的专业人员校核、深化与签发
 </footer>
 
-<script src="js/engine-bundle.js?v=sha256-9a6141463564c92107bee60df4a331f8f9bbef9c2eb461f410fdd3355e0cc105" data-generated-bundle-hash="sha256-9a6141463564c92107bee60df4a331f8f9bbef9c2eb461f410fdd3355e0cc105"></script>
-<script src="js/app.js?v=sha256-f6ecef2e6bc6ba3d92cfb195648fe80160dd6ea38680a90a48cd786af256fda8" data-generated-app-hash="sha256-f6ecef2e6bc6ba3d92cfb195648fe80160dd6ea38680a90a48cd786af256fda8"></script>
+<script src="js/engine-bundle.js?v=sha256-bd848431f17c74c17389d511b79e91e85b9cf6098f307cf0bf470142b21fc51a" data-generated-bundle-hash="sha256-bd848431f17c74c17389d511b79e91e85b9cf6098f307cf0bf470142b21fc51a"></script>
+<script src="js/app.js?v=sha256-acc5d2e29209ad45d41bb1caf8e75806d69acc46bea6510db5580957146e0065" data-generated-app-hash="sha256-acc5d2e29209ad45d41bb1caf8e75806d69acc46bea6510db5580957146e0065"></script>
 </body>
 </html>

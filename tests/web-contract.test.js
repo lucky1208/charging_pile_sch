@@ -15,12 +15,14 @@ test('Web 暴露明确的需求复核控件', () => {
   assert.match(app, /REQUIREMENTS\.generationGate/);
 });
 
-test('Web 禁用尚未验证的接口与桩型', () => {
-  assert.match(html, /value="nacs" disabled/);
-  assert.match(html, /value="chademo" disabled/);
-  assert.match(html, /value="dc-split" disabled/);
-  assert.match(html, /value="ac-dc-combo" disabled/);
-  assert.match(html, /value="ess-mobile" disabled/);
+test('Web 开放五种接口与四种桩型，不残留 disabled 占位项', () => {
+  ['nacs', 'chademo', 'dc-split', 'ac-dc-combo', 'ess-mobile'].forEach((value) => {
+    assert.match(html, new RegExp('value="' + value + '"'));
+    assert.doesNotMatch(html, new RegExp('value="' + value + '"\\s+disabled'));
+  });
+  assert.match(app, /value === 'ess-mobile'/);
+  assert.match(app, /\$\('f-ess'\)\.value = '1'/);
+  assert.match(app, /\$\('f-supply'\)\.value = 'offgrid'/);
 });
 
 test('AI 回填标准时同时使用共享标准电压映射', () => {

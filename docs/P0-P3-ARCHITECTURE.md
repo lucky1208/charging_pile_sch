@@ -17,12 +17,12 @@
 
 `engine/requirement-spec.js` 保存规范化需求及其来源、原文、置信度、问题、未决项和确认状态。自动翻译缺置信度、低于阈值或仍有未决项时，生成分成“翻译”和“用户确认”两步。
 
-当前 capability gate 仅开放：
+当前 capability gate 开放：
 
-- `standard ∈ {gb, eu, us}`；
-- `archetype = dc-integrated`。
+- `standard ∈ {gb, eu, us, nacs, chademo}`；
+- `archetype ∈ {dc-integrated, dc-split, ac-dc-combo, ess-mobile}`。
 
-能被词法识别不代表已有工程实现。NACS、CHAdeMO、分体式、交直流一体和移动储能桩不会回退为相似标准，而是阻断并说明原因。
+每个值都引用独立端子模板或拓扑模板；未知值、缺失必接端子或不满足桩型契约时不会回退为相似标准，而是阻断并说明原因。开放生成仅表示端子网表、绘图和内部闸门已实现，不构成标准认证结论。
 
 `engine/` 是浏览器与 CLI 的唯一核心源码。`scripts/sync-web.js` 自动复制模块并按受控依赖顺序生成 bundle；测试逐字节验证同步结果。
 

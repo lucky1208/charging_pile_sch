@@ -7,7 +7,7 @@
  *
  * 流程与浏览器端 app.js 完全一致：
  *   1. EVSE_ENGINE.build(params)                 确定性选型 + 工程模型 + 语义图校验
- *   2. drawPile(R)                               渲染 A3 SVG
+ *   2. drawPile(R)                               渲染自动选幅 SVG
  *   3. EVSE_DRAWING_SKILL.auditMarkup(...)       渲染规则校验（sch_lib 规则包）
  *      recordDrawingAudit + finalizeDrawingAudits
  *   4. canExport 闸门（fail-closed）              不通过则不写 SVG/DXF
@@ -46,7 +46,8 @@ const HELP = [
   'EVSE 充电桩电气原理图生成器（方案级概念草图，须经专业复核）',
   '用法: node scripts\\generate.js --params <params.json 路径> [--out <输出目录>] [--name <文件名前缀>] [--confirm-requirements]',
   '参数契约见 references/parameters.md；关键字段:',
-  '  standard(gb|eu|us) archetype(dc-integrated) outputKw gunCount(1-4) gunCurrentA(125|200|250|300|400)',
+  '  standard(gb|eu|us|nacs|chademo) archetype(dc-integrated|dc-split|ac-dc-combo|ess-mobile)',
+  '  outputKw gunCount(1-4) gunCurrentA(125|200|250|300|400|500)',
   '  moduleKw(15|20|30|40|60) voltageWindow thermal(air|liquid)',
   '  essEnabled essKwh essPowerKw essChem(lfp|nmc) essCoupling(dc|ac)',
   '输出目录: --out 未提供时使用当前工作目录',

@@ -459,7 +459,7 @@ window.SYM = (function () {
     }, overrides || {});
   }
 
-  /* ---------- A3 图框与标题栏 ---------- */
+  /* ---------- 动态图幅与标题栏 ---------- */
   function svgOpen(W, H, title, sub, meta) {
     const m = meta || {};
     const st = m.standard || '标准基线待项目确认';

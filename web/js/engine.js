@@ -67,6 +67,8 @@ window.EVSE_ENGINE = (function () {
 
     const std = STD.standard(P.standard);
     const arch = STD.archetype(P.archetype);
+    if (!std) throw new Error('未知或未受控的充电接口标准：' + String(P.standard));
+    if (!arch) throw new Error('未知或未受控的充电桩型：' + String(P.archetype));
     const window0 = VOLTAGE_WINDOWS[P.voltageWindow] || VOLTAGE_WINDOWS['200-1000'];
 
     /* ---------- 输出功率与功率模块 ---------- */
@@ -121,7 +123,8 @@ window.EVSE_ENGINE = (function () {
     /* 进线容量 = 充电模块 + 热管理 + 辅助电源，避免只按模块容量选进线开关 */
     const auxDemandKw = r1(liquidUnitKw + (psu24W + psu12W) / 1000 + (thermalMode === 'air' ? fanCount * 0.09 : 0));
     const inputKva = installedKw / (moduleEff * inputPf) + auxDemandKw;
-    const inputA = inputKva * 1000 / (Math.sqrt(3) * acLineVoltage);
+    const siteSupplyPhases = Number(std.siteSupplyPhases || std.phases) === 1 ? 1 : 3;
+    const inputA = inputKva * 1000 / ((siteSupplyPhases === 3 ? Math.sqrt(3) : 1) * acLineVoltage);
     const acBreakerA = pick(inputA * 1.25, STD.SERIES.breakerA, '交流进线断路器');
     const acContactorA = pick(inputA * 1.25, STD.SERIES.acContactorA, '交流主接触器');
     const acBusbarA = pick(inputA * 1.30, STD.SERIES.breakerA, '交流母排');
@@ -133,7 +136,7 @@ window.EVSE_ENGINE = (function () {
 
     const ac = {
       lineVoltage: acLineVoltage,
-      phases: std.phases,
+      phases: siteSupplyPhases,
       neutral: std.neutral,
       description: std.acVoltage,
       supplyMode, supplyText,
@@ -185,12 +188,16 @@ window.EVSE_ENGINE = (function () {
     const gunFuseA = pick(gunCurrentA * 1.25, STD.SERIES.dcFuseA, '枪回路快熔');
     const gunContactorA = pick(gunCurrentA * 1.25, STD.SERIES.dcContactorA, '枪回路直流接触器');
     const gunPowerKw = Math.min(installedKw, round(gunCurrentA * window0.max / 1000));
-    const controlSignalText = std.physicalLayer === 'CAN'
+    const controlSignalText = std.id === 'gb'
       ? 'CC1/CC2 连接确认 + 电子锁到位反馈 + 枪端温度 T1/T2'
-      : 'CP 控制导引(PWM) + PP 插头在位 + 电子锁到位反馈 + 枪端温度 T1/T2';
-    const commSignalText = std.physicalLayer === 'CAN'
+      : std.id === 'chademo'
+        ? '连接检查 + 启停1/启停2 + 充电使能 + Charger 12V（各自独立回路）'
+        : 'CP 控制导引(PWM) + PP 插头在位 + 电子锁到位反馈 + 枪端温度 T1/T2';
+    const commSignalText = std.id === 'gb'
       ? 'S+/S- CAN 250kbps（' + std.protocol + '）'
-      : 'CP 线载波 HomePlug Green PHY（' + std.protocol + '）';
+      : std.id === 'chademo'
+        ? 'CAN-H/CAN-L（' + std.protocol + '）'
+        : 'CP 线载波 HomePlug Green PHY（' + std.protocol + '）';
     const guns = [];
     for (let i = 1; i <= gunCount; i += 1) {
       guns.push({

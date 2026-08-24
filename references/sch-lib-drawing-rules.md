@@ -8,7 +8,7 @@
 2. `EVSE_SCHEMATIC_PLACEMENT.compile(design)` 产生放置与路由；
 3. `EVSE_DRAWING_IR.auditCoverage(design, ir)` 校验设备、网络、回路和精确端点覆盖；
 4. Drawing IR 全局检查交叉、连接点、共线重叠、自交与 keepout；
-5. SVG 审计核对 A3 文控、IR schema、coverage、geometry hash 和追溯属性；
+5. SVG 审计核对自动选定图幅的文控、IR schema、coverage、geometry hash 和追溯属性；
 6. `canExport()` 汇总需求、ERC、IR 与 SVG 审计，任一阻断则禁止 SVG/DXF。
 
 ## 机器执行规则
@@ -33,7 +33,7 @@
 
 ### 文档
 
-- `DOC-001`：完整 A3 SVG、图号、修订、校核/批准字段、图例与明细表；
+- `DOC-001`：完整 A3/A2/A1/A0 或受控自定义幅面 SVG、图号、修订、校核/批准字段、图例与明细表；
 - `DOC-002`：IR schema、coverage PASS 与 geometry hash；
 - `DOC-003`：无 `NaN`、`Infinity`、`undefined`；
 - `DOC-004`：方案级输出的人工审查边界。

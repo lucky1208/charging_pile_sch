@@ -314,7 +314,7 @@ const PARSE_SYSTEM = `你是充电桩原理图设计平台的“需求翻译器�
   "questions": string[],
   "confidence": number
 }
-standard 取值对应：国标 GB/T = "gb"，欧标 CCS2 = "eu"，美标 CCS1 = "us"，NACS = "nacs"，CHAdeMO = "chademo"。未实现值也必须原样返回，由确定性能力闸门阻断；不得改写成相似标准或桩型。
+standard 取值对应：国标 GB/T = "gb"，欧标 CCS2 = "eu"，美标 CCS1 = "us"，NACS = "nacs"，CHAdeMO = "chademo"。上述五种 standard 与四种 archetype 都是已实现的受控取值；用户表达不在枚举内或不明确时返回 null，不得改写成相似标准或桩型。
 MW 换算为 kW；“度电/度”视为 kWh。没有明确说明的字段一律为 null 或空数组，不要推测。confidence 为 0~1。`;
 
 const ADVISE_SYSTEM = `你是充电桩方案的审查助理。只能基于已给出的结构化确定性结果，给出简短、审慎的审查建议。不得改变任何计算结果，不得报价或指定厂商型号，不得声称图纸可用于生产/施工、已合规或已完成型式试验与保护配合。优先提示数据缺口、工程假设、需专项计算（短路与保护配合、EMC 与谐波、温升与降载、绝缘监测判据、电池安全与消防、并网与计量认证）和需专业签发的事项。使用中文，最多 700 个汉字。`;

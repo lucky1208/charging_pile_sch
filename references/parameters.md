@@ -8,16 +8,16 @@ JSON 对象，全部字段可选；缺省值见下表。Agent 的职责是**把�
 |---|---|---|---|---|
 | pileName | string | ≤40 字 | 充电桩 | 桩名，用于标题栏与文件名 |
 | site | string | 自由文本 | 空 | 站点 / 项目名 |
-| standard | string | `gb` 国标 GB/T / `eu` 欧标 CCS2 / `us` 美标 CCS1 | gb | 首批已验证范围；`nacs`、`chademo` 可被识别但会 fail-closed |
-| archetype | string | `dc-integrated` 直流一体 | dc-integrated | `dc-split`、`ac-dc-combo`、`ess-mobile` 尚未验证，会 fail-closed |
+| standard | string | `gb` 国标 GB/T / `eu` 欧标 CCS2 / `us` 美标 CCS1 / `nacs` SAE J3400 / `chademo` 日标 | gb | 五种接口均使用独立受控物理端子模板，未知值 fail-closed |
+| archetype | string | `dc-integrated` / `dc-split` / `ac-dc-combo` / `ess-mobile` | dc-integrated | 直流一体、直流分体、AC+DC 一体、储能移动四种独立拓扑 |
 | outputKw | number | ≥20，步长 10 | 120 | 额定输出功率 kW |
 | moduleKw | number | 15 / 20 / 30 / 40 / 60 | 40 | 单功率模块 kW（60 为液冷） |
 | gunCount | number | 1–4 | 2 | 充电枪数 |
-| gunCurrentA | number | 125 / 200 / 250（风冷）300 / 400（液冷） | 250 | 单枪电流 |
+| gunCurrentA | number | 125 / 200 / 250（风冷）300 / 400 / 500（液冷） | 250 | 单枪电流；500 A 必须复核连接器型式和温升试验 |
 | voltageWindow | string | `200-750` / `150-1000` / `200-1000` / `500-1000` | 200-1000 | 输出电压窗口（500-1000 为高压平台车型） |
-| acVoltage | number | 380 / 400 / 480 | 按标准（gb=380, eu=400, us=480） | 交流进线电压 |
+| acVoltage | number | 380 / 400 / 480 | 按标准（gb=380；eu/chademo=400；us/nacs=480） | **站点进线**线电压；NACS 车辆侧单相 L1/L2 与站点三相进线分开 |
 | supplyMode | string | `grid` 市电直供 / `transformer` 专变 / `offgrid` 离网为主 | transformer | 供电方式 |
-| essEnabled | bool | true / false | false | 是否配置储能（用户提"储能/削峰填谷/电池"才置 true） |
+| essEnabled | bool | true / false | false | 是否配置储能；`ess-mobile` 必须为 true，否则需求闸门阻断 |
 | essKwh | number | ≥20 | 200 | 储能目标容量 kWh |
 | essPowerKw | number | ≥10 | 120 | 储能变换功率 kW |
 | essChem | string | `lfp` 磷酸铁锂 / `nmc` 三元 | lfp | 电池化学体系 |
@@ -46,14 +46,14 @@ JSON 对象，全部字段可选；缺省值见下表。Agent 的职责是**把�
 1. 只提取用户**明确说出**的参数；没说的一律用缺省值，并在回复中列出"采用缺省/假设"的字段。
 2. 关键词映射示例：`国标/GB` → gb；`欧标/CCS2/欧洲` → eu；`美标/CCS1/美国` → us；`NACS/J3400` → nacs；`CHAdeMO` → chademo；`液冷` → thermal=liquid；`风冷` → air；`储能/削峰/电池容量 xxx 度` → essEnabled=true + essKwh；`无储能/不带储能` 必须优先解析为 essEnabled=false；`PCS/交流侧` → essCoupling=ac；`DC/DC 或直流侧` → dc。
 3. 识别不到的环境/特殊要求（沿海、高寒、防爆、一机多充等）原文写入 `specialRequirements`，**不要**自己推导工程措施。
-4. 数值冲突、非法枚举或未实现组合不得静默取近似值；需求闸门会阻止生成并要求修正。
+4. 数值冲突或非法枚举不得静默取近似值；需求闸门会阻止生成并要求修正。选择 `ess-mobile` 时必须显式启用储能，Web 会同步切换为离网为主的补能模式。
 5. 自动翻译置信度低于 0.75、缺失置信度或存在 questions/unresolvedItems 时，Web 必须勾选复核确认后再次生成；CLI 必须设置 `requirementConfirmed=true` 或显式传入 `--confirm-requirements`。
 
 ## 输出文件
 
 | 文件 | 内容 | 边界 |
 |---|---|---|
-| `<name>.svg` | A3 横向端子级原理图；每条 route 保存 equipment/net/circuit/exact endpoint 标识 | 概念草图，专业复核必需 |
+| `<name>.svg` | 自动选择 A3/A2/A1/A0（超出 A0 时使用受控自定义幅面）的端子级原理图；每条 route 保存 equipment/net/circuit/exact endpoint 标识 | 概念草图，专业复核必需 |
 | `<name>.dxf` | 与 SVG 共用 Drawing IR 的 R2010 DXF，语义标识保存为 `EVSE_IR` XDATA | 非 DWG 替代、无尺寸/保护整定 |
 | `<name>.json` | EVSE-SOLUTION-PACKAGE/1.0：RequirementSpec、EDEM v4、BOM、ERC、图模覆盖和导出闸门 | 厂家器件仍需受控审批/RFQ |
 

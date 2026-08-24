@@ -15,6 +15,7 @@
 window.EV_STD = (function () {
   'use strict';
 
+  const VERSION = '1.1.0';
   const BASIS = 'PROJECT_BASELINE—NOT_A_COMPLIANCE_CERTIFICATE';
 
   /* ---------- 充电标准 / 接口 ---------- */
@@ -26,6 +27,7 @@ window.EV_STD = (function () {
       region: '中国大陆',
       connector: 'GB/T 20234.3 直流充电接口（9 芯）',
       acConnector: 'GB/T 20234.2 交流充电接口（7 芯）',
+      acOutput: Object.freeze({ connectorType: 'gbt-ac', lineVoltage: 380, phases: 3, conductors: ['L1', 'L2', 'L3', 'N'], controlPins: ['CP', 'CC'], requiresTransformer: false }),
       protocol: 'GB/T 27930 充电通信（CAN 2.0B, 250kbps）',
       safety: 'GB/T 18487.1 电动汽车传导充电系统',
       physicalLayer: 'CAN',
@@ -54,6 +56,7 @@ window.EV_STD = (function () {
       region: '欧洲 / 中东 / 部分亚太',
       connector: 'IEC 62196-3 Configuration FF（CCS Combo 2）',
       acConnector: 'IEC 62196-2 Type 2',
+      acOutput: Object.freeze({ connectorType: 'type2-ac', lineVoltage: 400, phases: 3, conductors: ['L1', 'L2', 'L3', 'N'], controlPins: ['CP', 'PP'], requiresTransformer: false }),
       protocol: 'DIN 70121 / ISO 15118-2（HomePlug Green PHY 电力线通信）',
       safety: 'IEC 61851-1 / IEC 61851-23 直流充电机',
       physicalLayer: 'PLC',
@@ -82,6 +85,7 @@ window.EV_STD = (function () {
       region: '北美',
       connector: 'IEC 62196-3 Configuration EE（CCS Combo 1）',
       acConnector: 'SAE J1772 Type 1',
+      acOutput: Object.freeze({ connectorType: 'j1772-ac', lineVoltage: 240, phases: 1, conductors: ['L1', 'L2'], controlPins: ['CP', 'PP'], requiresTransformer: true }),
       protocol: 'DIN 70121 / ISO 15118 / SAE J2847-2（HomePlug Green PHY）',
       safety: 'UL 2202 / UL 2594 / NEC Article 625（适用性待认证机构确认）',
       physicalLayer: 'PLC',
@@ -109,7 +113,8 @@ window.EV_STD = (function () {
       name: '美标 NACS',
       region: '北美（特斯拉开放 / SAE J3400）',
       connector: 'SAE J3400 交直流一体接口（5 触点：DC+/L1、DC-/L2/N、PE、CP、PP）',
-      acConnector: 'SAE J3400 交流（L1/L2 复用触点，无三相）',
+      acConnector: 'SAE J3400 交流输出（L1/L2 复用两个大电流触点，单相）',
+      acOutput: Object.freeze({ connectorType: 'nacs-ac', lineVoltage: 240, phases: 1, conductors: ['L1', 'L2'], controlPins: ['CP', 'PP'], requiresTransformer: true }),
       protocol: 'ISO 15118 PLC · 兼容 PWM-CP（J1772）/ LIN-CP · 互操作 P1(DIN 70121)/P2(ISO 15118-2)',
       safety: 'UL 2202 / NEC Article 625 / SAE J3400（适用性待认证机构确认）',
       physicalLayer: 'PLC',
@@ -122,29 +127,35 @@ window.EV_STD = (function () {
       meter: 'NTEP / CTEP 计量认证电能表',
       meterNote: '计量认证与州计量局备案要求按销售州确认',
       backend: 'OCPP 1.6J / OCPP 2.0.1（TLS）· ISO 15118 即插即充',
-      acVoltage: 'AC 480V 分相（L1/L2 复用触点，无三相）',
+      /* 站点进线与车辆连接器输出是两个不同边界。北美直流快充柜
+       * 仍按 480V 三相站点进线建模；J3400 的两个大电流触点只描述
+       * 车辆侧单相交流输出或直流输出，绝不能把站点进线误画成两相。 */
+      acVoltage: '站点进线 AC 480V 3P+PE 60Hz；J3400 车辆侧交流输出为单相 L1/L2',
       acLineVoltage: 480,
-      phases: 2,
+      phases: 3,
       neutral: false,
+      connectorAcPhases: 1,
+      connectorAcConductors: ['L1', 'L2'],
       dcVoltageRange: [150, 1000],
       gunCurrentOptions: [250, 300, 400, 500],
       earthing: '按 NEC 接地与故障电流保护要求确认（含 GFCI/GFDI）',
-      note: 'NACS 五触点复用交直流；直流快充 CP/PP 与 CCS 同义，支持 V2G/V2H/V2L；插拔力≤100N、触点限温 100℃。'
+      note: 'J3400 五触点在车辆接口处复用交直流；本平台把站点交流进线与连接器交流输出分别建模。双向能力、温度限值和锁止策略须按选定 J3400 版本及认证方案复核。'
     },
     chademo: {
       id: 'chademo',
       connectorType: 'chademo',
       name: '日标 CHAdeMO',
       region: '日本 / 国际（CHAdeMO 协会）',
-      connector: 'CHAdeMO 直流接口（10 针：DC±/PE/CP/CAN_H/CAN_L/d1/d2）',
+      connector: 'CHAdeMO 直流接口（10 触点：DC±、FG/PE、Charger 12V、连接检查、启停1/2、充电使能、CAN-H/L）',
       acConnector: '无（纯直流接口；交流由车辆另配 Type1）',
-      protocol: 'CHAdeMO 0.9/1.x/2.0/3.0 · CAN 总线（车辆主导控制）',
+      acOutput: Object.freeze({ connectorType: 'j1772-ac', lineVoltage: 230, phases: 1, conductors: ['L1', 'N'], controlPins: ['CP', 'PP'], requiresTransformer: false, companionInterface: true }),
+      protocol: 'CHAdeMO 1.x / 2.0 / 2.1 · CAN 总线（车辆主导；项目必须锁定实际版本）',
       safety: 'CHAdeMO 规格 + 当地电气安全法规（适用性待确认）',
       physicalLayer: 'CAN',
-      dcPins: ['DC+', 'DC-', 'PE', 'CP', 'CAN_H', 'CAN_L', 'd1', 'd2'],
-      controlPins: ['CP'],
+      dcPins: ['DC+', 'DC-', 'PE', 'CHARGER_12V', 'CONNECTION_CHECK', 'START_STOP_1', 'START_STOP_2', 'CHARGE_ENABLE', 'CAN_H', 'CAN_L'],
+      controlPins: ['CONNECTION_CHECK', 'START_STOP_1', 'START_STOP_2', 'CHARGE_ENABLE'],
       commPins: ['CAN_H', 'CAN_L'],
-      auxPins: ['d1', 'd2'],
+      auxPins: ['CHARGER_12V'],
       electronicLock: false,
       temperaturePins: 0,
       meter: '直流电能表（按当地计量法规确认）',
@@ -154,10 +165,10 @@ window.EV_STD = (function () {
       acLineVoltage: 400,
       phases: 3,
       neutral: true,
-      dcVoltageRange: [50, 500],
-      gunCurrentOptions: [125, 200, 400],
+      dcVoltageRange: [50, 1000],
+      gunCurrentOptions: [125, 200, 400, 500],
       earthing: 'TN-S / TT（按站点接地型式复核）',
-      note: 'CHAdeMO 为车辆主导：BMS 经 CAN 下发需求；d1/d2 为充电启停使能回路，供电系统与电池系统经绝缘隔离。'
+      note: 'CHAdeMO 为车辆主导：BMS 经 CAN 下发需求；Charger 12V、连接检查、启停1/2与充电使能均为独立物理回路，不得压成一个 CP 或用模糊匹配自动接线。CHAdeMO 2.1 已公布最高 800A 能力，但本平台在缺少受控 800A 枪线/温升配置前只开放至 500A；更高电流必须 fail-closed 并由厂家与认证机构复核。'
     }
   };
 
@@ -234,8 +245,10 @@ window.EV_STD = (function () {
   function exceedsSeries(value, series) {
     return value > series[series.length - 1];
   }
-  const standard = (id) => STANDARDS[id] || STANDARDS.gb;
-  const archetype = (id) => ARCHETYPES[id] || ARCHETYPES['dc-integrated'];
+  /* Unknown identifiers are input errors.  Silent fallback could put GB/T
+   * terminals on a NACS/CHAdeMO requirement or select the wrong topology. */
+  const standard = (id) => STANDARDS[id] || null;
+  const archetype = (id) => ARCHETYPES[id] || null;
   const chemistry = (id) => CHEMISTRY[id] || CHEMISTRY.lfp;
 
   function cableFor(currentA, parallelLimit) {
@@ -255,7 +268,7 @@ window.EV_STD = (function () {
   }
 
   return {
-    BASIS, STANDARDS, ARCHETYPES, MODULE_OPTIONS, SERIES, CABLE, GUN_CABLE,
+    VERSION, BASIS, STANDARDS, ARCHETYPES, MODULE_OPTIONS, SERIES, CABLE, GUN_CABLE,
     CHEMISTRY, CELL_AH, CLUSTER_SERIES, COUPLING,
     nextIn, exceedsSeries, standard, archetype, chemistry, cableFor, gunCableFor, moduleFor
   };

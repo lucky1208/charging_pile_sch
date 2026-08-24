@@ -8,7 +8,7 @@ window.EVSE_DRAWING_SKILL = (function () {
   'use strict';
 
   const ID = 'EVSE-MODEL-DRAWING-INTEGRITY-SKILL';
-  const VERSION = '3.0.0';
+  const VERSION = '3.1.0';
   const BASIS_STATUS = 'EDEM_V4_AND_GEOMETRY_IR—PROFESSIONAL_REVIEW_REQUIRED';
   const DRAWING_KEY = 'ev-schematic';
   const SOURCE_LIBRARY = Object.freeze([
@@ -29,7 +29,7 @@ window.EVSE_DRAWING_SKILL = (function () {
     { id: 'G046', group: 'geometry', enforcement: 'BLOCKING', text: '通道容量与 lane 分配必须由确定性路由器证明可行。' },
     { id: 'G047', group: 'coverage', enforcement: 'BLOCKING', text: '每台设备、每个网络、每条回路及其端点必须由 Drawing IR 精确覆盖。' },
     { id: 'G048', group: 'traceability', enforcement: 'BLOCKING', text: 'SVG 与 DXF 必须保留 equipment/net/circuit/endpoint 追溯标识。' },
-    { id: 'DOC-001', group: 'document', enforcement: 'BLOCKING', text: '输出必须是完整 A3 SVG，并保留图号、修订和审核状态。' },
+    { id: 'DOC-001', group: 'document', enforcement: 'BLOCKING', text: '输出必须是完整 SVG；A3/A2/A1/A0/CUSTOM 实际图幅、方向、尺寸和比例必须与 Drawing IR/图签一致。' },
     { id: 'DOC-002', group: 'document', enforcement: 'BLOCKING', text: '图纸必须携带模型 schema、几何哈希和覆盖状态。' },
     { id: 'DOC-003', group: 'document', enforcement: 'BLOCKING', text: '图纸不得包含 NaN、Infinity 或 undefined 坐标。' },
     { id: 'DOC-004', group: 'document', enforcement: 'GUIDANCE', text: '自动图纸仍须专业校核、试验和签发，不得标记为施工图。' }
@@ -159,6 +159,79 @@ window.EVSE_DRAWING_SKILL = (function () {
     return values;
   }
 
+  function rootAttributeValue(markup, name) {
+    const root = /^<svg\b([^>]*)>/.exec(String(markup || ''));
+    if (!root) return '';
+    const match = new RegExp('\\b' + escapeRegExp(name) + '="([^"]*)"').exec(root[1]);
+    return match ? match[1] : '';
+  }
+
+  function validSheetContract(markup, result, ir) {
+    const plan = result && result.drawingPlan;
+    const planned = plan && plan.sheet;
+    const declared = ir && ir.metadata && ir.metadata.sheet;
+    const control = result && result.drawingDocumentControl;
+    const problems = [];
+    if (!plan || !planned) problems.push('drawingPlan.sheet missing');
+    if (!declared) problems.push('drawingIR.metadata.sheet missing');
+    if (!control) problems.push('drawingDocumentControl missing');
+    if (problems.length) return { ok: false, problems };
+    const allowed = new Set(['A3', 'A2', 'A1', 'A0', 'CUSTOM']);
+    const format = String(planned.format || '');
+    const orientation = String(planned.orientation || '');
+    const widthMm = Number(planned.widthMm);
+    const heightMm = Number(planned.heightMm);
+    const canvasWidth = Number(planned.canvasWidth);
+    const canvasHeight = Number(planned.canvasHeight);
+    const scale = String(planned.scale || '');
+    if (!allowed.has(format)) problems.push('unsupported format ' + format);
+    if (!['LANDSCAPE', 'PORTRAIT'].includes(orientation)) problems.push('invalid orientation ' + orientation);
+    if (!(widthMm > 0) || !(heightMm > 0) || !(canvasWidth > 0) || !(canvasHeight > 0)) problems.push('non-positive sheet dimensions');
+    if (scale !== '1:4' || Number(planned.plotScaleDenominator) !== 4) problems.push('plot scale must be 1:4');
+    if (Math.abs(canvasWidth - widthMm * 4) > 1 || Math.abs(canvasHeight - heightMm * 4) > 1) problems.push('canvas/physical scale mismatch');
+    const standardLandscape = {
+      A3: [1680, 1188, 420, 297], A2: [2376, 1680, 594, 420],
+      A1: [3364, 2376, 841, 594], A0: [4756, 3364, 1189, 841]
+    };
+    if (format !== 'CUSTOM') {
+      const base = standardLandscape[format];
+      const expected = orientation === 'LANDSCAPE' ? base : [base[1], base[0], base[3], base[2]];
+      if ([canvasWidth, canvasHeight, widthMm, heightMm].some((value, index) => Math.abs(value - expected[index]) > 1e-9)) {
+        problems.push('standard sheet dimensions mismatch');
+      }
+    } else {
+      const a0Fits = (Number(plan.requiredWidth) <= 4756 && Number(plan.requiredHeight) <= 3364) ||
+        (Number(plan.requiredWidth) <= 3364 && Number(plan.requiredHeight) <= 4756);
+      if (a0Fits) problems.push('CUSTOM used although A0 fits');
+      if (canvasWidth < Number(plan.requiredWidth) || canvasHeight < Number(plan.requiredHeight)) problems.push('CUSTOM canvas clips required content');
+    }
+    const same = (source, label) => {
+      if (!source || String(source.format) !== format || String(source.orientation) !== orientation ||
+          Number(source.widthMm) !== widthMm || Number(source.heightMm) !== heightMm || String(source.scale) !== scale) {
+        problems.push(label + ' differs from drawingPlan.sheet');
+      }
+    };
+    same(declared, 'drawingIR.metadata.sheet');
+    same(control, 'drawingDocumentControl');
+    const viewBox = rootAttributeValue(markup, 'viewBox').trim().split(/[ ,]+/).map(Number);
+    if (viewBox.length !== 4 || viewBox.some((value) => !Number.isFinite(value)) ||
+        viewBox[0] !== 0 || viewBox[1] !== 0 || viewBox[2] !== canvasWidth || viewBox[3] !== canvasHeight) {
+      problems.push('SVG viewBox differs from planned canvas');
+    }
+    const rootChecks = {
+      width: widthMm + 'mm', height: heightMm + 'mm',
+      'data-sheet-format': format, 'data-sheet-orientation': orientation,
+      'data-sheet-format-actual': format, 'data-sheet-width-mm': String(widthMm),
+      'data-sheet-height-mm': String(heightMm), 'data-plot-scale': scale
+    };
+    Object.keys(rootChecks).forEach((name) => {
+      if (rootAttributeValue(markup, name) !== rootChecks[name]) problems.push('SVG root ' + name + ' mismatch');
+    });
+    if (!new RegExp('图幅:\\s*' + escapeRegExp(format)).test(markup) ||
+        !new RegExp('比例:\\s*' + escapeRegExp(scale)).test(markup)) problems.push('title block sheet/scale mismatch');
+    return { ok: problems.length === 0, problems, planned };
+  }
+
   function auditMarkup(markup, drawingKey, result) {
     const text = String(markup || '');
     const profile = profileFor(drawingKey);
@@ -173,7 +246,10 @@ window.EVSE_DRAWING_SKILL = (function () {
     const IR = window.EVSE_DRAWING_IR;
 
     add('G000-SVG-COMPLETE', 'DOC-001', /^<svg\b/.test(text) && /<\/svg>\s*$/.test(text), '输出必须是完整 SVG。');
-    add('G001-A3', 'DOC-001', /width="420mm"/.test(text) && /height="297mm"/.test(text), '输出必须保留 A3 物理图幅。');
+    const sheetContract = validSheetContract(text, result, ir);
+    add('G001-SHEET', 'DOC-001', sheetContract.ok,
+      'SVG 实际图幅、方向、物理尺寸、viewBox、1:4比例、IR metadata 与图签必须完全一致；仅 A0 放不下时允许 CUSTOM。',
+      sheetContract.problems);
     add('G002-DOCUMENT-CONTROL', 'DOC-001', /图号:/.test(text) && /修订:/.test(text) && /校核:/.test(text) && /批准:/.test(text), 'SVG 必须包含图号、修订、校核和批准字段。');
     add('G003-FINITE', 'DOC-003', !/\b(?:undefined|NaN|Infinity|-Infinity)\b/.test(text), 'SVG 不得包含未解析值或非有限坐标。');
     add('G004-IR-ROOT', 'DOC-002', !!ir && attrPresent(text, 'data-ir-schema', ir && ir.schema), 'SVG 根必须记录 Drawing IR schema。');
@@ -210,19 +286,28 @@ window.EVSE_DRAWING_SKILL = (function () {
     const renderedEquipment = attributeValues(text, 'data-equipment');
     const renderedNets = attributeValues(text, 'data-net');
     const renderedCircuits = attributeValues(text, 'data-circuit');
-    const routeByCircuit = new Map(((ir && ir.routes) || []).map((route) => [route.circuitId, route]));
-    ((design && (design.instances || design.equipment)) || []).forEach((instance) => {
+    const traceByCircuit = new Map([].concat((ir && ir.routes) || [], (ir && ir.aliasTraces) || [])
+      .map((trace) => [trace.circuitId, trace]));
+    const designEquipment = ((design && (design.instances || design.equipment)) || []);
+    const logicalProxyEquipment = new Set(designEquipment.filter((instance) =>
+      instance && instance.logicalOnlyProxy === true).map((instance) => instance.id));
+    designEquipment.filter((instance) => !instance || instance.logicalOnlyProxy !== true).forEach((instance) => {
       if (!renderedEquipment.has(instance.id)) missingEquipment.push(instance.id);
     });
+    const renderedLogicalProxies = Array.from(logicalProxyEquipment).filter((id) => renderedEquipment.has(id));
     ((design && design.nets) || []).forEach((net) => { if (!renderedNets.has(net.id)) missingNets.push(net.id); });
     ((design && design.circuits) || []).forEach((circuit) => {
       if (!renderedCircuits.has(circuit.id)) missingCircuits.push(circuit.id);
       const from = circuit.from + ':' + circuit.fromPort;
       const to = circuit.to + ':' + circuit.toPort;
-      const route = routeByCircuit.get(circuit.id);
-      if (!route || route.source.ref !== from || route.target.ref !== to) endpointMismatch.push(circuit.id);
+      const trace = traceByCircuit.get(circuit.id);
+      if (!trace || trace.source.ref !== from || trace.target.ref !== to) endpointMismatch.push(circuit.id);
     });
-    add('G048-EQUIPMENT-TRACE', 'G048', missingEquipment.length === 0, 'SVG 必须保留每台设备的 data-equipment。', missingEquipment);
+    add('G048-EQUIPMENT-TRACE', 'G048', missingEquipment.length === 0 && renderedLogicalProxies.length === 0,
+      'SVG 必须保留每台物理设备的 data-equipment，且不得把 logicalOnlyProxy 渲染为第二台物理设备。', {
+        missingPhysicalEquipment: missingEquipment,
+        renderedLogicalProxies
+      });
     add('G048-NET-TRACE', 'G048', missingNets.length === 0, 'SVG 必须保留每个网络的 data-net。', missingNets);
     add('G048-CIRCUIT-TRACE', 'G048', missingCircuits.length === 0, 'SVG 必须保留每条回路的 data-circuit。', missingCircuits);
     add('G048-ENDPOINT-TRACE', 'G048', endpointMismatch.length === 0, '每条图形路由必须保持模型的精确 from/to 端点。', endpointMismatch);

@@ -323,11 +323,17 @@
       equipmentId: primitive.equipmentId || '',
       portId: primitive.portId || '',
       endpointRef: primitive.endpointRef || '',
+      terminalId: primitive.terminalId || '',
+      symbolId: primitive.symbolId || '',
+      symbolRole: primitive.symbolRole || '',
+      deviceKind: primitive.deviceKind || '',
       routeId: primitive.routeId || '',
       netId: primitive.netId || '',
       circuitId: primitive.circuitId || '',
       from: primitive.from || '',
       to: primitive.to || '',
+      physicalFrom: primitive.physicalFrom || '',
+      physicalTo: primitive.physicalTo || '',
       routeIds: Array.isArray(primitive.routeIds) ? primitive.routeIds.join(',') : '',
       bridgeRouteId: primitive.bridgeRouteId || ''
     }, extra || {});
@@ -402,15 +408,15 @@
       const deviceId = nonEmpty(device && (device.id || device.equipmentId), 'devices[' + index + '].id');
       if (devices.has(deviceId)) throw directError('DRAWING_IR_DUPLICATE_DEVICE', 'Duplicate placed device.', { deviceId });
       devices.add(deviceId);
-      const body = primitiveById.get('DEVICE:' + deviceId);
-      if (!body || body.kind !== 'rect' || String(body.equipmentId || '') !== deviceId ||
-          !sameNumber(body.x, device.bbox && device.bbox.xMin) ||
-          !sameNumber(body.y, device.bbox && device.bbox.yMin) ||
-          !sameNumber(body.width, device.bbox && device.bbox.width) ||
-          !sameNumber(body.height, device.bbox && device.bbox.height)) {
-        throw directError('DRAWING_IR_DEVICE_PRIMITIVE_MISMATCH', 'Placed device differs from its renderer-neutral body primitive.', {
-          deviceId, primitiveId: body && body.id || null
-        });
+      const symbolPrimitives = ir.primitives.filter((primitive) =>
+        String(primitive.equipmentId || '') === deviceId && primitive.kind !== 'port');
+      if (!symbolPrimitives.length || symbolPrimitives.some((primitive) =>
+        String(primitive.symbolId || '') !== String(device.symbolId || ''))) {
+        throw directError('DRAWING_IR_DEVICE_PRIMITIVE_MISMATCH',
+          'Placed device has no matching renderer-neutral IEC symbol primitives.', {
+            deviceId, symbolId: device.symbolId || null,
+            primitiveIds: symbolPrimitives.map((primitive) => primitive.id)
+          });
       }
       (Array.isArray(device.ports) ? device.ports : []).forEach((port) => {
         const ref = nonEmpty(port.ref, 'device[' + deviceId + '].port.ref');
@@ -518,6 +524,17 @@
     const primitives = ir.primitives.slice().sort((a, b) => compareText(a.id, b.id));
     const entities = [];
     const traceRecords = [];
+    const aliasTraceRecords = (ir.aliasTraces || []).map((trace) => Object.freeze({
+      id: trace.id,
+      circuitId: trace.circuitId,
+      netId: trace.netId,
+      from: trace.source.ref,
+      to: trace.target.ref,
+      physicalFrom: trace.physicalSource.ref,
+      physicalTo: trace.physicalTarget.ref,
+      reason: trace.reason,
+      logicalProxyIds: trace.logicalProxyIds.slice()
+    }));
     const entityCounts = {};
     const warnings = ['DXF 仅为方案级可编辑草图；不得替代施工图、计算书、设备数据表或专业签发。'];
 
@@ -529,7 +546,7 @@
         0, type,
         100, 'AcDbEntity',
         8, layer,
-        6, style.linetype,
+        6, primitive.dash ? 'DASHED' : style.linetype,
         370, style.lineweight,
         ...geometry,
         ...xdata(trace)
@@ -550,7 +567,8 @@
     primitives.forEach((primitive) => {
       const kind = String(primitive.kind || '').toLowerCase();
       if (kind === 'polyline') {
-        addPolyline(primitive, primitive.points, false, { sourcePointCount: primitive.points.length });
+        addPolyline(primitive, primitive.points, primitive.closed === true,
+          { sourcePointCount: primitive.points.length, closed: primitive.closed === true });
         return;
       }
       if (kind === 'rect') {
@@ -616,12 +634,36 @@
         ]);
         return;
       }
+      if (kind === 'arc') {
+        const radius = finite(primitive.radius, primitive.id + '.radius');
+        if (!(radius > 0)) throw directError('DRAWING_IR_ARC_INVALID',
+          'Arc radius must be positive.', { primitiveId: primitive.id });
+        let startAngle = finite(primitive.startAngle, primitive.id + '.startAngle');
+        let endAngle = finite(primitive.endAngle, primitive.id + '.endAngle');
+        if (transform.description.flipY) {
+          const sourceStart = startAngle;
+          startAngle = 360 - endAngle;
+          endAngle = 360 - sourceStart;
+        }
+        addEntity('ARC', primitive, [
+          100, 'AcDbCircle', 10, transform.x(primitive.x), 20, transform.y(primitive.y), 30, 0,
+          40, transform.radius(radius), 100, 'AcDbArc', 50, startAngle, 51, endAngle
+        ]);
+        return;
+      }
       if (kind === 'text') {
-        addEntity('TEXT', primitive, [
+        const anchor = String(primitive.anchor || 'start');
+        const horizontal = anchor === 'middle' ? 1 : anchor === 'end' ? 2 : 0;
+        const rotation = finite(primitive.rotation == null ? 0 : primitive.rotation, primitive.id + '.rotation');
+        const geometry = [
           100, 'AcDbText', 10, transform.x(primitive.x), 20, transform.y(primitive.y), 30, 0,
           40, transform.radius(primitive.height == null ? 2.5 : primitive.height),
-          1, cleanText(primitive.text), 7, 'STANDARD'
-        ]);
+          1, cleanText(primitive.text), 7, 'STANDARD', 50,
+          transform.description.flipY ? -rotation : rotation
+        ];
+        if (horizontal) geometry.push(72, horizontal, 73, 2,
+          11, transform.x(primitive.x), 21, transform.y(primitive.y), 31, 0);
+        addEntity('TEXT', primitive, geometry);
         return;
       }
       if (!opts.skipUnsupported) {
@@ -652,10 +694,13 @@
         transform: transform.description
       },
       document,
-      trace: { method: 'DXF_XDATA', appId: XDATA_APP_ID, valueEncoding: 'URI_COMPONENT', entityCount: traceRecords.length },
+      trace: { method: 'DXF_XDATA_AND_COMMENT_METADATA', appId: XDATA_APP_ID,
+        valueEncoding: 'URI_COMPONENT', entityCount: traceRecords.length,
+        aliasTraceCount: aliasTraceRecords.length, aliasTraces: aliasTraceRecords },
       layers: cloneManifest(manifest),
       scope: {
-        included: ['Drawing IR primitives', 'placed devices and terminal anchors', 'routed circuit polylines', 'junction and bridge markers', 'EVSE_IR XDATA trace'],
+        included: ['Drawing IR primitives', 'placed devices and terminal anchors', 'routed circuit polylines',
+          'non-conductor logical alias trace metadata', 'junction and bridge markers', 'EVSE_IR XDATA trace'],
         excluded: ['native CAD blocks', 'dimensioning', 'protection settings', 'cable schedules', 'approval/signature', 'construction-level verification'],
         status: 'CONCEPT_DRAFT—PROFESSIONAL_REVIEW_REQUIRED'
       }
@@ -669,12 +714,14 @@
       xdataAppId: XDATA_APP_ID,
       primitiveCount: primitives.length,
       routeCount: ir.routes.length,
+      aliasTraceCount: aliasTraceRecords.length,
       markerCount: ir.markers.length
     }));
     const dxf = header + tables(manifest) + pairs(
       0, 'SECTION', 2, 'ENTITIES',
       999, comment,
-      999, 'EVSE-DXF-IR-MANIFEST: ' + compactManifest
+      999, 'EVSE-DXF-IR-MANIFEST: ' + compactManifest,
+      ...aliasTraceRecords.flatMap((trace) => [999, 'EVSE-DXF-ALIAS-TRACE: ' + cleanText(JSON.stringify(trace))])
     ) + entities.join('') + pairs(0, 'ENDSEC', 0, 'EOF');
     return Object.freeze({
       dxf,
@@ -685,10 +732,13 @@
         primitives: primitives.length,
         devices: ir.devices.length,
         routes: ir.routes.length,
+        aliasTraces: aliasTraceRecords.length,
+        circuitTraces: ir.routes.length + aliasTraceRecords.length,
         markers: ir.markers.length,
         layerEntityCounts: Object.freeze(Object.assign({}, entityCounts))
       }),
       trace: Object.freeze(traceRecords),
+      aliasTraces: Object.freeze(aliasTraceRecords),
       manifest: Object.freeze(manifestData)
     });
   }

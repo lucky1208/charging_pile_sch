@@ -14,7 +14,7 @@
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null), function () {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const SCHEMA = 'EVSE-REQUIREMENT/1.0';
   const CONFIDENCE_REVIEW_THRESHOLD = 0.75;
 
@@ -23,7 +23,7 @@
     archetype: Object.freeze(['dc-integrated', 'dc-split', 'ac-dc-combo', 'ess-mobile']),
     moduleKw: Object.freeze([15, 20, 30, 40, 60]),
     gunCount: Object.freeze([1, 2, 3, 4]),
-    gunCurrentA: Object.freeze([125, 200, 250, 300, 400]),
+    gunCurrentA: Object.freeze([125, 200, 250, 300, 400, 500]),
     voltageWindow: Object.freeze(['200-750', '150-1000', '200-1000', '500-1000']),
     supplyMode: Object.freeze(['grid', 'transformer', 'offgrid']),
     essChem: Object.freeze(['lfp', 'nmc']),
@@ -36,8 +36,8 @@
 
   const STANDARD_VOLTAGES = Object.freeze({ gb: 380, eu: 400, us: 480, nacs: 480, chademo: 400 });
   const SUPPORTED = Object.freeze({
-    standards: Object.freeze(['gb', 'eu', 'us']),
-    archetypes: Object.freeze(['dc-integrated'])
+    standards: Object.freeze(ENUMS.standard.slice()),
+    archetypes: Object.freeze(ENUMS.archetype.slice())
   });
 
   /* 这些值也是 Web 表单启动后的实际值；HTML 中的 value 只作无脚本回退。 */
@@ -142,7 +142,7 @@
   function normaliseArchetype(value) {
     const valueText = lower(value);
     if (/移动|充电车|ess[-_\s]*mobile|mobile/.test(valueText)) return 'ess-mobile';
-    if (/交直流|ac[-_\s]*dc[-_\s]*(?:combo|integrated)|combo/.test(valueText)) return 'ac-dc-combo';
+    if (/交直流|交流一体|ac[-_\s]*dc[-_\s]*(?:combo|integrated)|combo/.test(valueText)) return 'ac-dc-combo';
     if (/分体|功率柜.*终端|dc[-_\s]*split|split/.test(valueText)) return 'dc-split';
     if (/一体|dc[-_\s]*integrated|integrated/.test(valueText)) return 'dc-integrated';
     if (ENUMS.archetype.includes(valueText)) return valueText;
@@ -353,13 +353,13 @@
     if (!SUPPORTED.standards.includes(value.standard)) {
       issues.push({
         code: 'UNSUPPORTED_STANDARD', field: 'standard', value: value.standard,
-        message: '接口标准“' + (value.standard || '未识别') + '”尚未完成端子模型与图模一致性验证；当前仅支持 GB、CCS2(EU)、CCS1(US)。'
+        message: '接口标准“' + (value.standard || '未识别') + '”不在受控枚举中；允许值为 GB、CCS2、CCS1、NACS、CHAdeMO。'
       });
     }
     if (!SUPPORTED.archetypes.includes(value.archetype)) {
       issues.push({
         code: 'UNSUPPORTED_ARCHETYPE', field: 'archetype', value: value.archetype,
-        message: '桩型“' + (value.archetype || '未识别') + '”尚未完成拓扑与路由实现；当前仅支持直流一体式。'
+        message: '桩型“' + (value.archetype || '未识别') + '”不在受控枚举中；允许值为直流一体式、直流分体式、交直流一体式、储能移动充电桩。'
       });
     }
     return issues;
@@ -386,6 +386,12 @@
     rangeIssue('essPowerKw', 0, 5000, 'kW', 'essPowerKw');
     rangeIssue('moduleEfficiency', 0.8, 1, '', 'moduleEfficiency');
     rangeIssue('inputPf', 0.8, 1, '', 'inputPf');
+    if (value.archetype === 'ess-mobile' && value.essEnabled !== true) {
+      issues.push({
+        code: 'ARCHETYPE_REQUIRES_ESS', field: 'essEnabled', value: value.essEnabled,
+        message: '储能移动充电桩必须显式启用储能系统，不能以无储能拓扑生成。'
+      });
+    }
     if (!invalidFormatFields.has('acVoltage') && (!Number.isFinite(Number(value.acVoltage)) || Number(value.acVoltage) <= 0)) {
       issues.push({ code: 'INVALID_NUMBER', field: 'acVoltage', value: value.acVoltage, message: 'acVoltage 必须是大于 0 的有限数字。' });
     } else if (!invalidFormatFields.has('acVoltage')) {

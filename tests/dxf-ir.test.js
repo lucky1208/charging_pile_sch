@@ -124,7 +124,8 @@ test('direct DXF route geometry and electrical trace come from Drawing IR unchan
   assert.match(result.dxf, /\n2\nEVSE_IR\n/);
   assert.equal(result.manifest.source.schema, IR.SCHEMA);
   assert.equal(result.manifest.source.drawingIRHash, IR.drawingIRHash(drawing));
-  assert.equal(result.manifest.trace.method, 'DXF_XDATA');
+  assert.equal(result.manifest.trace.method, 'DXF_XDATA_AND_COMMENT_METADATA');
+  assert.match(result.dxf, /\n999\nEVSE-DXF-IR-MANIFEST: /);
   assert.ok(!result.warnings.some((warning) => warning.includes('LEGACY_SVG_PARSE')));
 });
 
@@ -138,12 +139,14 @@ test('device, port, junction, and bridge primitives retain semantic XDATA and ma
   const result = DXF.exportDrawingIR(drawing);
   const entities = entityRecords(result.dxf);
 
-  const deviceEntity = entities.find((entity) => xdataFields(entity).primitiveId === 'DEVICE:EQ-A' && entity.type === 'LWPOLYLINE');
+  const deviceEntity = entities.find((entity) => xdataFields(entity).equipmentId === 'EQ-A' &&
+    xdataFields(entity).symbolId === device.symbolId && xdataFields(entity).symbolRole === 'function-frame');
   const portEntity = entities.find((entity) => xdataFields(entity).primitiveId === 'PORT:EQ-A:CAN');
   const junction = entities.find((entity) => xdataFields(entity).markerType === 'junction');
   const bridge = entities.find((entity) => xdataFields(entity).markerType === 'bridge');
   assert.ok(deviceEntity);
   assert.equal(xdataFields(deviceEntity).equipmentId, 'EQ-A');
+  assert.equal(xdataFields(deviceEntity).symbolId, device.symbolId);
   assert.ok(portEntity);
   assert.equal(xdataFields(portEntity).endpointRef, 'EQ-A:CAN');
   assert.equal(junction.type, 'CIRCLE');
@@ -214,4 +217,3 @@ test('legacy SVG compatibility entry is explicitly identified in warnings', () =
     else global.DOMParser = previous;
   }
 });
-

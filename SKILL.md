@@ -1,10 +1,10 @@
 ---
 name: evse-schematic-design
-description: 生成充电桩（EVSE）方案级端子原理图与方案包：将国标 GB/T、欧标 CCS2、美标 CCS1 的需求编译为 EDEM v4 端子网表，经 ERC、确定性布线和图模等价性闸门后输出 A3 SVG、R2010 DXF 与 JSON。适用于充电桩、充电堆、储能充电站、超充桩、EVSE、原理图、系统图、选型、BOM、功率模块/快熔/接触器配置等请求。
-version: 2.0.0
+description: 生成充电桩（EVSE）方案级端子原理图与方案包：将 GB/T、CCS2、CCS1、NACS、CHAdeMO 及直流一体、直流分体、交直流一体、储能移动桩需求编译为 EDEM v4 端子网表，经 ERC、确定性布线和图模等价性闸门后输出 SVG、R2010 DXF 与 JSON。
+version: 2.1.0
 author: 卢继雄
 created_at: 2026-08-18
-updated_at: 2026-08-19
+updated_at: 2026-08-24
 ---
 
 # 充电桩端子级电气原理图自动设计
@@ -24,11 +24,11 @@ updated_at: 2026-08-19
 
 ## 已实现范围
 
-- 接口：`gb`、`eu`、`us`；
-- 桩型：`dc-integrated`；
+- 接口：`gb`、`eu`、`us`、`nacs`、`chademo`；
+- 桩型：`dc-integrated`、`dc-split`、`ac-dc-combo`、`ess-mobile`；
 - 充电枪：1–4；
 - 储能：无储能、DC/DC 直流耦合、PCS 交流耦合；
-- 其他已能识别但尚未验证的标准或桩型必须 fail-closed，包括 NACS、CHAdeMO、分体式、交直流一体和移动储能桩。
+- 未知枚举、缺失必需储能/端子、未通过 ERC、几何或图模覆盖的组合必须 fail-closed，不得回退到“最相近”的标准或桩型。
 
 ## 数据流
 
@@ -49,7 +49,7 @@ RequirementSpec（来源/置信度/未决项/人工确认）
 
 1. 只提取用户明确给出的需求。字段、枚举和默认值见 `references/parameters.md`；未知专项要求原文放入 `specialRequirements`。
 2. 把参数保存为 UTF-8 JSON，例如 `params.json`。
-3. 在 Node.js 24.x 运行：
+3. 在 Node.js 24.x 运行（`component-workbench/` 仍兼容 Node.js 20 以上）：
 
    ```powershell
    node <skill目录>\scripts\generate.js --params params.json --out <输出目录> --name <文件名前缀>
@@ -68,7 +68,7 @@ RequirementSpec（来源/置信度/未决项/人工确认）
 npx serve <skill目录>\web
 ```
 
-浏览器打开本地地址。此静态启动方式可使用表单、本地规则需求解析和确定性出图；仓库的 `api/ai.js` 可在 Vercel 上提供同源 AI 需求翻译，密钥只通过服务端环境变量配置。Web 加载由 `engine/` 生成的 bundle，CLI 按同一受控顺序直接加载这些 `engine/` 模块；两者不再维护第二份手工核心代码。任何 `engine/*.js` 改动后必须执行：
+浏览器打开本地地址。此静态启动方式可使用表单、本地规则需求解析和确定性出图；仓库中的 `api/ai.js` 可在 Vercel 上提供同源 AI 需求翻译代理，密钥仅通过服务端环境变量配置，静态服务不可用时安全回退本地解析。Web 加载由 `engine/` 生成的 bundle，CLI 按同一受控顺序直接加载这些 `engine/` 模块；两者不再维护第二份手工核心代码。任何 `engine/*.js` 改动后必须执行：
 
 ```powershell
 npm run verify
@@ -119,7 +119,7 @@ npm run test:matrix
 npm run test:p3
 ```
 
-正式矩阵覆盖 `3 标准 × 3 功率 × 4 枪数 × 3 储能模式 × 2 热管理 = 216` 个组合。完整结果见 `docs/P0-P3-VERIFICATION.md`，几何专项说明见 `docs/P2-DRAWING-IR-VERIFICATION.md`。
+2026-08-24 发布基线为全套测试 `160 / 160`（核心编译器 `149 / 149`，同源 API 代理 `11 / 11`）、216 参数矩阵 `216 / 216`。216 矩阵覆盖 `3 标准 × 3 功率 × 4 枪数 × 3 储能模式 × 2 热管理` 的直流一体式高密度参数回归；另以 `5 接口 × 4 桩型 = 20` 个组合验证每种端子级拓扑契约。两条基线用途不同，完整结果见 `docs/` 下验收报告。
 
 ## 禁止事项
 

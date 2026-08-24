@@ -17,18 +17,34 @@
  * ============================================================ */
 (function (root, factory) {
   'use strict';
-  const api = factory();
+  let symbolCatalog = root && root.EVSE_IEC_SYMBOL_CATALOG;
+  if (!symbolCatalog && typeof module === 'object' && module && module.exports && typeof require === 'function') {
+    symbolCatalog = require('./iec-symbol-catalog.js');
+  }
+  const api = factory(symbolCatalog);
   if (root) root.EVSE_DRAWING_IR = api;
   if (typeof module === 'object' && module && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window :
-  (typeof globalThis !== 'undefined' ? globalThis : this), function () {
+  (typeof globalThis !== 'undefined' ? globalThis : this), function (IEC_SYMBOLS) {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   const SCHEMA = 'evse-drawing-ir/v1';
   const EPSILON = 1e-9;
 
+  function iecSymbols(required) {
+    const catalog = IEC_SYMBOLS || (typeof window !== 'undefined' && window.EVSE_IEC_SYMBOL_CATALOG) ||
+      (typeof globalThis !== 'undefined' && globalThis.EVSE_IEC_SYMBOL_CATALOG);
+    if (!catalog && required !== false) {
+      throw new DrawingIRError('IEC_SYMBOL_CATALOG_MISSING',
+        'EVSE_IEC_SYMBOL_CATALOG must be loaded before device primitives are built.');
+    }
+    return catalog || null;
+  }
+
   const DEFAULT_LAYERS = Object.freeze([
+    Object.freeze({ id: 'EVSE-TEXT', purpose: 'drawing-text' }),
+    Object.freeze({ id: 'EVSE-ANNO', purpose: 'functional-zones-and-annotations' }),
     Object.freeze({ id: 'EVSE-EQPT', purpose: 'equipment' }),
     Object.freeze({ id: 'EVSE-AC', purpose: 'power-ac' }),
     Object.freeze({ id: 'EVSE-DC', purpose: 'power-dc' }),
@@ -224,10 +240,16 @@
       }
       seen.add(keepout.id);
     });
+    const catalog = iecSymbols(false);
+    const resolvedSymbol = catalog && catalog.resolve
+      ? catalog.resolve(value.type || value.deviceClass || '')
+      : { symbolId: value.symbolId || 'evse.function-block.generic', fallback: true };
     return Object.freeze({
       id,
       equipmentId: id,
       type: String(value.type || value.deviceClass || ''),
+      symbolId: String(value.symbolId || resolvedSymbol.symbolId),
+      symbolFallback: value.symbolFallback === true || (!value.symbolId && resolvedSymbol.fallback === true),
       system: String(value.system || ''),
       tag: String(value.tag || ''),
       referenceDesignation: String(value.referenceDesignation || value.ref || ''),
@@ -397,8 +419,47 @@
       ref: nonEmptyId(ref, label + '.ref'),
       deviceId,
       portId,
+      physicalRef: String(raw.physicalRef || ref),
       x: finite(raw.x == null ? fallback.x : raw.x, label + '.x'),
       y: finite(raw.y == null ? fallback.y : raw.y, label + '.y')
+    });
+  }
+
+  function normalizeTraceEndpoint(value, label) {
+    const raw = typeof value === 'string' ? { ref: value } : (value || {});
+    const parsed = raw.ref ? splitEndpointRef(raw.ref) : null;
+    const deviceId = String(raw.deviceId || raw.equipmentId || (parsed && parsed.deviceId) || '');
+    const portId = String(raw.portId || raw.terminalId || (parsed && parsed.portId) || '');
+    const ref = raw.ref || (deviceId && portId ? endpointRef(deviceId, portId) : '');
+    return Object.freeze({ ref: nonEmptyId(ref, label + '.ref'), deviceId, portId });
+  }
+
+  function createAliasTrace(spec) {
+    const value = spec || {};
+    const circuitId = nonEmptyId(value.circuitId, 'aliasTrace.circuitId');
+    const source = normalizeTraceEndpoint(value.source, 'aliasTrace[' + circuitId + '].source');
+    const target = normalizeTraceEndpoint(value.target, 'aliasTrace[' + circuitId + '].target');
+    const physicalSource = normalizeTraceEndpoint(value.physicalSource,
+      'aliasTrace[' + circuitId + '].physicalSource');
+    const physicalTarget = normalizeTraceEndpoint(value.physicalTarget,
+      'aliasTrace[' + circuitId + '].physicalTarget');
+    const reason = String(value.reason || '');
+    if (!['COLOCATED_LOGICAL_ALIAS', 'DUPLICATE_PHYSICAL_ROUTE_ALIAS'].includes(reason)) {
+      throw new DrawingIRError('ALIAS_TRACE_REASON_INVALID',
+        'Alias trace ' + circuitId + ' must declare a controlled non-conductor reason.', { circuitId, reason });
+    }
+    return Object.freeze({
+      id: nonEmptyId(value.id || 'ALIAS:' + circuitId, 'aliasTrace.id'),
+      circuitId,
+      netId: nonEmptyId(value.netId, 'aliasTrace[' + circuitId + '].netId'),
+      netClass: String(value.netClass || ''),
+      domain: String(value.domain || ''),
+      source,
+      target,
+      physicalSource,
+      physicalTarget,
+      reason,
+      logicalProxyIds: Object.freeze(uniqueSorted(value.logicalProxyIds || []))
     });
   }
 
@@ -823,7 +884,14 @@
     const value = drawing || {};
     const routes = (Array.isArray(value.routes) ? value.routes : []).map((route) =>
       route && route.source && route.target && Array.isArray(route.segments) ? route : routeOrthogonal(route));
-    const modelDeviceIds = uniqueSorted(modelDeviceArray(model).map(itemId));
+    const aliasTraces = (Array.isArray(value.aliasTraces) ? value.aliasTraces : []).map((trace) =>
+      trace && trace.source && trace.target && trace.physicalSource && trace.physicalTarget && trace.reason
+        ? trace : createAliasTrace(trace));
+    const modelDevices = modelDeviceArray(model);
+    const logicalProxyIds = uniqueSorted(modelDevices.filter((device) =>
+      device && device.logicalOnlyProxy === true).map(itemId));
+    const modelDeviceIds = uniqueSorted(modelDevices.filter((device) =>
+      !device || device.logicalOnlyProxy !== true).map(itemId));
     const drawingDevices = Array.isArray(value.devices) ? value.devices : [];
     const drawingDeviceIds = drawingDevices.length
       ? uniqueSorted(drawingDevices.map(itemId))
@@ -876,6 +944,41 @@
       routeIds.add(route.id);
     });
 
+    const modelDeviceById = new Map(modelDevices.map((device) => [itemId(device), device]));
+    const aliasIds = new Set();
+    const aliasedCircuitIds = new Set();
+    aliasTraces.forEach((trace) => {
+      if (aliasIds.has(trace.id)) errors.push({ code: 'DUPLICATE_ALIAS_TRACE_ID', id: trace.id });
+      aliasIds.add(trace.id);
+      if (aliasedCircuitIds.has(trace.circuitId)) errors.push({ code: 'DUPLICATE_ALIAS_CIRCUIT_ID', id: trace.circuitId });
+      aliasedCircuitIds.add(trace.circuitId);
+      if (routes.some((route) => route.circuitId === trace.circuitId)) {
+        errors.push({ code: 'CIRCUIT_BOTH_ROUTE_AND_ALIAS', id: trace.circuitId });
+      }
+      const declaredProxyIds = uniqueSorted(trace.logicalProxyIds || []);
+      const endpointProxyIds = uniqueSorted([trace.source.deviceId, trace.target.deviceId].filter((id) => {
+        const device = modelDeviceById.get(id);
+        return device && device.logicalOnlyProxy === true;
+      }));
+      if (!endpointProxyIds.length || !equalSets(declaredProxyIds, endpointProxyIds)) {
+        errors.push({ code: 'ALIAS_TRACE_PROXY_MISMATCH', id: trace.circuitId,
+          declared: declaredProxyIds, actual: endpointProxyIds });
+      }
+      if (trace.reason === 'COLOCATED_LOGICAL_ALIAS' &&
+          trace.physicalSource.ref !== trace.physicalTarget.ref) {
+        errors.push({ code: 'ALIAS_TRACE_NOT_COLOCATED', id: trace.circuitId,
+          physicalSource: trace.physicalSource.ref, physicalTarget: trace.physicalTarget.ref });
+      }
+      if (trace.reason === 'DUPLICATE_PHYSICAL_ROUTE_ALIAS') {
+        const aliasPhysical = [trace.physicalSource.ref, trace.physicalTarget.ref].sort(compareText);
+        const matchingRoute = routes.some((route) => equalSets(aliasPhysical,
+          [route.source.physicalRef || route.source.ref, route.target.physicalRef || route.target.ref].sort(compareText)) &&
+          route.netId === trace.netId);
+        if (!matchingRoute) errors.push({ code: 'ALIAS_TRACE_PHYSICAL_ROUTE_MISSING', id: trace.circuitId,
+          netId: trace.netId, physicalEndpoints: aliasPhysical });
+      }
+    });
+
     const circuits = model && Array.isArray(model.circuits) ? model.circuits : [];
     const nets = model && Array.isArray(model.nets) ? model.nets.map((net) => Object.assign({}, net)) : [];
     if (nets.length && circuits.length) {
@@ -888,18 +991,22 @@
       });
       nets.forEach((net) => { net.members = netMap.get(itemId(net)); });
     }
-    auditConnectionCollection('circuit', circuits, routes, 'circuitId', errors);
-    auditConnectionCollection('net', nets, routes, 'netId', errors);
+    const circuitTraces = routes.concat(aliasTraces);
+    auditConnectionCollection('circuit', circuits, circuitTraces, 'circuitId', errors);
+    auditConnectionCollection('net', nets, circuitTraces, 'netId', errors);
     errors.sort((a, b) => compareText(stableStringify(a), stableStringify(b)));
     return Object.freeze({
       ok: errors.length === 0,
       errors: Object.freeze(errors.map((error) => Object.freeze(error))),
       summary: Object.freeze({
         modelDevices: modelDeviceIds.length,
+        logicalProxyDevices: logicalProxyIds.length,
         drawingDevices: drawingDeviceIds.length,
         modelNets: nets.length,
         modelCircuits: circuits.length,
-        drawingRoutes: routes.length
+        drawingRoutes: routes.length,
+        aliasTraces: aliasTraces.length,
+        coveredCircuitTraces: routes.length + aliasTraces.length
       })
     });
   }
@@ -910,17 +1017,23 @@
   }
 
   function devicePrimitives(device) {
-    const result = [{
-      id: 'DEVICE:' + device.id,
-      kind: 'rect',
-      layer: device.layer,
+    const catalog = iecSymbols(true);
+    const symbol = catalog.instantiate({
+      kind: device.type,
+      symbolId: device.symbolId,
+      bbox: device.bbox,
+      ports: device.ports,
+      label: device.label,
+      tag: device.tag
+    });
+    const result = symbol.primitives.map((primitive, index) => Object.assign({}, primitive, {
+      id: 'DEVICE:' + device.id + ':SYMBOL:' + String(index + 1).padStart(3, '0'),
+      layer: primitive.layer || device.layer,
       equipmentId: device.id,
-      x: device.bbox.xMin,
-      y: device.bbox.yMin,
-      width: device.bbox.width,
-      height: device.bbox.height,
-      label: device.label
-    }];
+      deviceKind: device.type,
+      symbolId: symbol.symbolId,
+      symbolFallback: symbol.fallback === true
+    }));
     device.ports.forEach((port) => result.push({
       /* A physical terminal may deliberately have several graphical tap
          anchors (one per exact circuit).  endpointRef remains the physical
@@ -930,6 +1043,8 @@
       layer: device.layer,
       equipmentId: device.id,
       portId: port.id,
+      terminalId: port.terminalId,
+      label: port.label,
       endpointRef: port.ref,
       x: port.x,
       y: port.y
@@ -952,6 +1067,8 @@
       protocol: route.protocol,
       from: route.source.ref,
       to: route.target.ref,
+      physicalFrom: route.source.physicalRef || route.source.ref,
+      physicalTo: route.target.physicalRef || route.target.ref,
       points: route.points.map((p) => ({ x: p.x, y: p.y }))
     };
   }
@@ -971,6 +1088,40 @@
     };
   }
 
+  function annotationPrimitive(input, index) {
+    const value = input || {};
+    const kind = String(value.kind || '').toLowerCase();
+    if (!['rect', 'text', 'line', 'polyline'].includes(kind)) {
+      throw new DrawingIRError('ANNOTATION_PRIMITIVE_UNSUPPORTED',
+        'Drawing annotation ' + index + ' uses unsupported primitive kind ' + kind + '.', { index, kind });
+    }
+    const result = Object.assign({}, value, {
+      id: nonEmptyId(value.id || 'ANNOTATION:' + (index + 1), 'annotation.id'),
+      kind,
+      layer: String(value.layer || (kind === 'text' ? 'EVSE-TEXT' : 'EVSE-ANNO')),
+      annotationRole: String(value.annotationRole || 'drawing-note')
+    });
+    if (kind === 'rect') {
+      const rect = normalizeRect(value, 'annotation[' + index + ']');
+      Object.assign(result, { x: rect.xMin, y: rect.yMin, width: rect.width, height: rect.height });
+    } else if (kind === 'text') {
+      result.x = finite(value.x, 'annotation[' + index + '].x');
+      result.y = finite(value.y, 'annotation[' + index + '].y');
+      result.text = String(value.text || '');
+      result.height = finite(value.height == null ? 9 : value.height, 'annotation[' + index + '].height');
+    } else if (kind === 'line') {
+      ['x1', 'y1', 'x2', 'y2'].forEach((key) => { result[key] = finite(value[key], 'annotation[' + index + '].' + key); });
+    } else {
+      if (!Array.isArray(value.points) || value.points.length < 2) throw new DrawingIRError(
+        'ANNOTATION_POLYLINE_TOO_SHORT', 'Drawing annotation polyline requires at least two points.', { index });
+      result.points = value.points.map((item) => ({
+        x: finite(item.x, 'annotation[' + index + '].point.x'),
+        y: finite(item.y, 'annotation[' + index + '].point.y')
+      }));
+    }
+    return Object.freeze(result);
+  }
+
   function normalizeLayers(layers) {
     const source = Array.isArray(layers) && layers.length ? layers : DEFAULT_LAYERS;
     return source.map((layer) => Object.freeze({
@@ -985,8 +1136,11 @@
       device && device.bbox && Array.isArray(device.ports) ? device : createPlacedDevice(device));
     const routes = (Array.isArray(value.routes) ? value.routes : []).map((route) =>
       route && route.source && route.target && Array.isArray(route.segments) ? route : routeOrthogonal(route));
+    const aliasTraces = (Array.isArray(value.aliasTraces) ? value.aliasTraces : []).map(createAliasTrace);
+    const annotations = (Array.isArray(value.annotations) ? value.annotations : []).map(annotationPrimitive);
     devices.sort((a, b) => compareText(a.id, b.id));
     routes.sort((a, b) => compareText(a.id, b.id));
+    aliasTraces.sort((a, b) => compareText(a.id, b.id));
     const deviceIds = new Set();
     devices.forEach((device) => {
       if (deviceIds.has(device.id)) throw new DrawingIRError('DUPLICATE_DEVICE_ID', 'Duplicate placed device ' + device.id + '.', { id: device.id });
@@ -997,6 +1151,16 @@
       if (routeIds.has(route.id)) throw new DrawingIRError('DUPLICATE_ROUTE_ID', 'Duplicate route ' + route.id + '.', { id: route.id });
       routeIds.add(route.id);
     });
+    const aliasIds = new Set();
+    const circuitTraceIds = new Set(routes.map((route) => route.circuitId));
+    aliasTraces.forEach((trace) => {
+      if (aliasIds.has(trace.id)) throw new DrawingIRError('DUPLICATE_ALIAS_TRACE_ID',
+        'Duplicate alias trace ' + trace.id + '.', { id: trace.id });
+      if (circuitTraceIds.has(trace.circuitId)) throw new DrawingIRError('CIRCUIT_BOTH_ROUTE_AND_ALIAS',
+        'Circuit ' + trace.circuitId + ' cannot be both a conductor route and alias trace.', { circuitId: trace.circuitId });
+      aliasIds.add(trace.id);
+      circuitTraceIds.add(trace.circuitId);
+    });
     const analysis = analyzeGeometry({ devices, routes });
     const markers = analysis.junctions.concat(analysis.bridges).map((marker) => Object.freeze(Object.assign({}, marker)));
     markers.sort((a, b) => compareText(markerId(a), markerId(b)));
@@ -1004,7 +1168,14 @@
     devices.forEach((device) => primitives.push(...devicePrimitives(device)));
     routes.forEach((route) => primitives.push(routePrimitive(route)));
     markers.forEach((marker) => primitives.push(markerPrimitive(marker)));
+    annotations.forEach((annotation) => primitives.push(annotation));
     primitives.sort((a, b) => compareText(a.id, b.id));
+    const primitiveIds = new Set();
+    primitives.forEach((primitive) => {
+      if (primitiveIds.has(primitive.id)) throw new DrawingIRError('DUPLICATE_PRIMITIVE_ID',
+        'Duplicate renderer-neutral primitive ' + primitive.id + '.', { id: primitive.id });
+      primitiveIds.add(primitive.id);
+    });
     const ir = {
       schema: SCHEMA,
       version: VERSION,
@@ -1013,7 +1184,9 @@
       layers: Object.freeze(normalizeLayers(value.layers)),
       devices: Object.freeze(devices),
       routes: Object.freeze(routes),
+      aliasTraces: Object.freeze(aliasTraces),
       markers: Object.freeze(markers),
+      annotations: Object.freeze(annotations),
       primitives: Object.freeze(primitives.map((primitive) => Object.freeze(primitive))),
       violations: analysis.violations,
       coverage: null
@@ -1029,6 +1202,8 @@
     return buildDrawingIR({
       devices: value.devices || [],
       routes: value.routes || [],
+      aliasTraces: value.aliasTraces || [],
+      annotations: value.annotations || [],
       model: value.model || null,
       metadata: value.metadata || {},
       layers: value.layers || DEFAULT_LAYERS,
@@ -1076,7 +1251,9 @@
         ports: sortById(device.ports), keepouts: sortById(device.keepouts)
       })),
       routes: sortById(value.routes),
+      aliasTraces: sortById(value.aliasTraces),
       markers: sortById(value.markers),
+      annotations: sortById(value.annotations),
       primitives: sortById(value.primitives),
       violations: (Array.isArray(value.violations) ? value.violations.slice() : []).sort((a, b) =>
         compareText(eventKey(a), eventKey(b))),
@@ -1103,6 +1280,7 @@
     GeometryValidationError,
     createPortAnchor,
     createPlacedDevice,
+    createAliasTrace,
     createChannel,
     allocateIntervalLanes,
     assignChannelLanes,

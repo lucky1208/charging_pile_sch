@@ -9,7 +9,7 @@
  *               30KW DC/DC M1~M2、BCU/EVCC/SECC、K1~K10 200A-24V、预充 K3 50A-24V
  *               + 200W-30R、开关电源 4500W-24V / 360W-12V、RS1/RS2、FU1~FU3、
  *               浪涌 3P+N、漏电继电器、KM1/KM2、电子锁及反馈、PE 接地端子、急停开关组）
- *   SRC-GB-SVG  sch_lib/国标60kW充电桩电气原理图.svg
+ *   SRC-GB-SVG  sch_lib/国标60kW充电桩原理图.svg
  *   SRC-EU-SVG  sch_lib/欧标充电桩电气原理图.svg
  *
  * 定位：本库是"画法规则与必备组件清单"，不是报价目录、不是标准符合性证明。
@@ -24,7 +24,7 @@ window.EVSE_COMPONENT_LIB = (function () {
   const SOURCES = Object.freeze([
     { id: 'SRC-GB-PDF', file: '国标充电桩电气原理图.pdf', type: 'reference-schematic', reviewed: true },
     { id: 'SRC-EU-PDF', file: '欧标充电桩电气原理图.pdf', type: 'reference-schematic', reviewed: true },
-    { id: 'SRC-GB-SVG', file: 'sch_lib/国标60kW充电桩电气原理图.svg', type: 'reference-schematic', reviewed: true },
+    { id: 'SRC-GB-SVG', file: 'sch_lib/国标60kW充电桩原理图.svg', type: 'reference-schematic', reviewed: true },
     { id: 'SRC-EU-SVG', file: 'sch_lib/欧标充电桩电气原理图.svg', type: 'reference-schematic', reviewed: true }
   ]);
 

@@ -29,19 +29,30 @@ test('NACS 与 CHAdeMO 不会被宽泛的美标/CAN 规则吞掉', () => {
   assert.equal(SPEC.parseLocal('CHAdeMO 双枪 120kW').standard, 'chademo');
 });
 
+test('四种桩型中文名称不会被宽泛“一体式”规则吞掉', () => {
+  assert.equal(SPEC.normaliseArchetype('直流一体式'), 'dc-integrated');
+  assert.equal(SPEC.normaliseArchetype('直流分体式功率柜+终端'), 'dc-split');
+  assert.equal(SPEC.normaliseArchetype('交流一体式 AC+DC'), 'ac-dc-combo');
+  assert.equal(SPEC.normaliseArchetype('储能移动充电桩'), 'ess-mobile');
+});
+
 test('标准改变时从共享映射得到对应交流输入电压', () => {
   assert.equal(SPEC.normaliseParams({ standard: 'gb' }, { source: 'CLI' }).acVoltage, 380);
   assert.equal(SPEC.normaliseParams({ standard: 'eu' }, { source: 'CLI' }).acVoltage, 400);
   assert.equal(SPEC.normaliseParams({ standard: 'us' }, { source: 'CLI' }).acVoltage, 480);
+  assert.equal(SPEC.normaliseParams({ standard: 'nacs' }, { source: 'CLI' }).acVoltage, 480);
+  assert.equal(SPEC.normaliseParams({ standard: 'chademo' }, { source: 'CLI' }).acVoltage, 400);
 });
 
-test('首批范围仅允许 GB/EU/US + dc-integrated', () => {
-  ['gb', 'eu', 'us'].forEach((standard) => {
-    assert.deepEqual(SPEC.supportIssues(SPEC.normaliseParams({ standard, archetype: 'dc-integrated' })), []);
+test('五种标准和四种桩型全部进入受控生成范围', () => {
+  SPEC.ENUMS.standard.forEach((standard) => {
+    SPEC.ENUMS.archetype.forEach((archetype) => {
+      const params = SPEC.normaliseParams({ standard, archetype, essEnabled: archetype === 'ess-mobile' });
+      assert.deepEqual(SPEC.supportIssues(params), [], standard + '/' + archetype);
+    });
   });
-  assert.equal(SPEC.supportIssues(SPEC.normaliseParams({ standard: 'nacs' }))[0].code, 'UNSUPPORTED_STANDARD');
-  assert.equal(SPEC.supportIssues(SPEC.normaliseParams({ standard: 'chademo' }))[0].code, 'UNSUPPORTED_STANDARD');
-  assert.equal(SPEC.supportIssues(SPEC.normaliseParams({ archetype: 'dc-split' }))[0].code, 'UNSUPPORTED_ARCHETYPE');
+  assert.ok(SPEC.generationGate({ archetype: 'ess-mobile', essEnabled: false }).issues
+    .some((issue) => issue.code === 'ARCHETYPE_REQUIRES_ESS'));
 });
 
 test('低置信度、缺失置信度或未决项必须明确确认', () => {
@@ -63,17 +74,17 @@ test('来源、置信度和未决项进入规范化参数', () => {
   assert.deepEqual(params.unresolvedItems, ['确认短路容量']);
 });
 
-test('生成闸门同时执行实现范围与人工确认检查', () => {
+test('生成闸门同时执行受控枚举与人工确认检查', () => {
   const blocked = SPEC.generationGate({
     standard: 'nacs',
     requirement: { source: 'LOCAL_RULES', confidence: 0.55 }
   });
   assert.equal(blocked.allowed, false);
-  assert.equal(blocked.issues[0].code, 'UNSUPPORTED_STANDARD');
+  assert.deepEqual(blocked.issues, []);
   assert.equal(blocked.confirmation.allowed, false);
 
   const allowed = SPEC.generationGate({
-    standard: 'eu', archetype: 'dc-integrated',
+    standard: 'nacs', archetype: 'dc-split',
     requirement: { source: 'LOCAL_RULES', confidence: 0.55 },
     requirementConfirmed: true
   });

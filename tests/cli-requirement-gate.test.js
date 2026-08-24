@@ -16,10 +16,10 @@ function run(params, extraArgs) {
   ].concat(extraArgs || []), { cwd: rootDir, encoding: 'utf8' });
 }
 
-test('CLI 对尚未实现的标准 fail-closed', () => {
-  const result = run({ standard: 'nacs' });
+test('CLI 对受控枚举之外的标准 fail-closed', () => {
+  const result = run({ standard: 'megacharge' });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /UNSUPPORTED|尚未完成|当前仅支持/);
+  assert.match(result.stderr, /不在受控枚举|允许值|UNSUPPORTED/);
 });
 
 test('CLI 对低置信度自动翻译要求明确确认', () => {
