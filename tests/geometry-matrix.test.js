@@ -51,7 +51,7 @@ test('216 supported parameter combinations have exact, deterministic SVG/DXF geo
           requirementConfirmed: true
         });
         const result = win.EVSE_ENGINE.build(params);
-        assert.equal(result.design.schemaVersion, '4.0.0');
+        assert.equal(result.design.schemaVersion, '4.1.0');
         assert.equal(result.design.modelValidation.blockingCount, 0,
           (result.design.modelValidation.violations || [])
             .map((item) => item.code + '@' + item.location).join(','));

@@ -182,7 +182,7 @@ test('functional zoning follows electrical flow and preserves readable fixed-sca
   assert.equal(ir.coverage.ok, true);
   assert.deepEqual(ir.violations, []);
   assert.deepEqual(plan.zones.map((zone) => zone.id),
-    ['POWER_FLOW', 'AUXILIARY', 'CONTROL_COMM', 'PROTECTIVE_EARTH']);
+    ['POWER_FLOW', 'AUXILIARY', 'SAFETY_DIAGNOSTICS', 'CONTROL_COMM', 'PROTECTIVE_EARTH']);
   assert.equal(ir.annotations.length, plan.zones.length * 2);
   plan.zones.forEach((zone) => {
     assert.match(svg, new RegExp('data-primitive="ZONE:' + zone.id + ':TITLE"'));

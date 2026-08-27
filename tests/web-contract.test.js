@@ -45,3 +45,11 @@ test('Web 的 DXF 与 JSON 导出直接携带 Drawing IR，不回退解析 SVG',
   assert.match(app, /drawingIR:\s*state\.R\.drawingIR \|\| null/);
   assert.doesNotMatch(app, /exportSvgLegacy\(exportSvgMarkup/);
 });
+
+test('Web 明示功能安全模型与 Qwen 候选知识的工程边界', () => {
+  assert.match(html, /id="functional-unit-status"/);
+  assert.match(app, /renderFunctionalUnitStatus\(\)/);
+  assert.match(app, /functionalUnitKnowledge/);
+  assert.match(app, /禁止自动选型/);
+  assert.match(app, /板级电路、器件值、阈值和时序仍为项目待决项/);
+});

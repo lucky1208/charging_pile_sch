@@ -311,6 +311,7 @@
       renderDrawing();
       renderSummary();
       renderDesignStatus();
+      renderFunctionalUnitStatus();
       $('empty-hint').style.display = 'none';
       $('result-area').style.display = 'block';
       logStep('✅ 已生成确定性充电桩原理图。', 'ok');
@@ -427,6 +428,45 @@
     const assumptions = (R.assumptions || []).slice(0, 6);
     if (assumptions.length) detail += '<br><b>引擎采用的假设：</b>' + assumptions.map((item) => escapeHtml(item.id + ' = ' + item.value)).join('；');
     el.innerHTML = '<div class="state-box">' + detail + '<div class="state-tags">' + tags.join('') + '</div></div>';
+  }
+
+  function renderFunctionalUnitStatus() {
+    const R = state.R, el = $('functional-unit-status');
+    if (!R || !el) return;
+    const knowledge = R.functionalUnitKnowledge;
+    const design = R.design || {};
+    const units = design.topology && Array.isArray(design.topology.functionalUnits)
+      ? design.topology.functionalUnits : [];
+    const machine = design.topology && design.topology.safetyStateMachine;
+    if (!knowledge) {
+      el.innerHTML = '<div class="state-box"><b>功能安全模型：</b><span style="color:#f85149">知识库未加载，禁止把输出视为已完成控制/诊断设计。</span></div>';
+      return;
+    }
+    const groups = Array.isArray(knowledge.groups) ? knowledge.groups : [];
+    const pilotUnits = units.filter((unit) => unit && unit.type === 'CONTROL_PILOT_INTERFACE');
+    const diagnosticUnits = units.filter((unit) => unit && unit.type === 'OUTPUT_SAFETY_DIAGNOSTICS');
+    const groupMarkup = groups.map((group) => {
+      const variants = Array.isArray(group.variants) ? group.variants : [];
+      return '<div style="margin:5px 0"><b>' + escapeHtml(group.name) + '</b> · ' +
+        escapeHtml(group.executableMapping || '—') + '<br><span style="color:var(--text2)">' +
+        variants.map((variant) => escapeHtml(variant.name + ' [' + variant.lifecycle + ']')).join('；') + '</span></div>';
+    }).join('');
+    const tags = [
+      '<span class="state-tag calc">端子级功能合同：' + units.length + '</span>',
+      '<span class="state-tag calc">状态机：' + escapeHtml((machine && machine.status) || 'MISSING') + '</span>',
+      '<span class="state-tag">候选分类：' + Number(knowledge.groupCount || groups.length) + '</span>',
+      '<span class="state-tag warn">候选拓扑：' + Number(knowledge.variantCount || 0) + ' · 禁止自动选型</span>'
+    ];
+    const pilotSummary = pilotUnits.length
+      ? '其中 ' + pilotUnits.length + ' 个具有物理 CP 触点的接口已建模 CP 发生、高阻采样与车辆二极管检查。'
+      : '当前接口没有物理 CP 触点，CP 发生、采样与车辆二极管检查按标准适用性标记为 N/A，未虚构 CP 电路。';
+    el.innerHTML = '<div class="state-box" style="margin-top:8px"><b>控制导引与输出诊断：</b>' +
+      diagnosticUnits.length + ' 个输出接口' + (diagnosticUnits.length === 1 ? '已' : '均已') +
+      '建模送电前输出预检及接触器逐极状态监测；' + pilotSummary +
+      '<br><span style="color:#e3b341">板级电路、器件值、阈值和时序仍为项目待决项；下列 Qwen 来源资料只作 CANDIDATE 浏览，系统没有自动采用任何变体。</span>' +
+      '<div class="state-tags">' + tags.join('') + '</div>' +
+      '<details class="engine-inputs" style="margin-bottom:0"><summary>查看 ' + groups.length + ' 类 / ' + Number(knowledge.variantCount || 0) + ' 个候选拓扑（只读）</summary>' +
+      groupMarkup + '</details></div>';
   }
 
   /* ---------- 缩放 ---------- */

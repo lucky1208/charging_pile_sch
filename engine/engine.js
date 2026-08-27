@@ -1,5 +1,5 @@
 ﻿/* ============================================================
- * 充电桩确定性选型与原理图工程引擎  v4.0
+ * 充电桩确定性选型与原理图工程引擎  v4.1
  * ------------------------------------------------------------
  * 职责：把表单参数确定性地翻译成设备数量、额定档位、回路参数和
  * 工程模型。相同输入必须得到完全相同的输出。
@@ -11,7 +11,7 @@
 window.EVSE_ENGINE = (function () {
   'use strict';
 
-  const ENGINE_VERSION = '4.0.0';
+  const ENGINE_VERSION = '4.1.0';
   const DOCUMENT_STATUS = 'CONCEPT_DRAFT—PROFESSIONAL_REVIEW_REQUIRED';
 
   const asNumber = (value, fallback) => {
@@ -326,6 +326,11 @@ window.EVSE_ENGINE = (function () {
       addSched(gun.lockTag, '枪' + gun.index + ' 电子锁', gun.lockText + '・24V 取自 A1 DO');
       addSched(gun.tag, '充电枪 ' + gun.index, std.name + '：' + gun.pinText + ' · ' + gun.cableText);
     });
+    addSched('SC1~' + gunCount, '各输出送电前预检功能', '接触器下游逐导体检测；测试路径默认隔离，阈值与时序由项目计算');
+    addSched('AD1~' + gunCount, '各输出接触器状态/粘连监测', '逐安全隔离极反馈并监测下游电位；器件实现与诊断覆盖待工程复核');
+    if (Array.isArray(std.dcPins) && std.dcPins.includes('CP')) {
+      addSched('CPG/CPM/DIO 1~' + gunCount, '各输出 CP 发生/采样/车辆二极管检查', '端子级功能合同已建立；板级拓扑、器件值及阈值不得自动选型');
+    }
     addSched('A1', '充电控制单元', 'CCU · ' + std.protocol + '·供电 24VDC 取自 WB4');
     addSched('A2', std.physicalLayer === 'PLC' ? 'SECC 控制器' : '计费网关', aux.backendText + '·供电 24VDC 取自 WB4');
     addSched('A3', '路由器 / 通信模块', aux.networkText + '・供电 24VDC 取自 WB4');
@@ -443,6 +448,24 @@ window.EVSE_ENGINE = (function () {
     const design = window.EVSE_DESIGN.create({
       params: P, standard: std, ac, dc, guns, ess, aux, assumptions, schedule, engineVersion: ENGINE_VERSION
     });
+    const functionalUnitKnowledge = window.EVSE_FUNCTIONAL_UNIT_LIBRARY &&
+      typeof window.EVSE_FUNCTIONAL_UNIT_LIBRARY.describe === 'function'
+      ? window.EVSE_FUNCTIONAL_UNIT_LIBRARY.describe(design)
+      : null;
+    const functionalUnits = design.topology && Array.isArray(design.topology.functionalUnits)
+      ? design.topology.functionalUnits : [];
+    const pilotUnitCount = functionalUnits.filter((unit) => unit.type === 'CONTROL_PILOT_INTERFACE').length;
+    const outputDiagnosticCount = functionalUnits.filter((unit) => unit.type === 'OUTPUT_SAFETY_DIAGNOSTICS').length;
+    validation.push({
+      id: 'EV-FUNC-001', result: 'NOT_CHECKED', rule: '控制导引与输出安全诊断板级实现',
+      ref: 'EDEM v4.1 functionalUnits / safetyStateMachine',
+      detail: outputDiagnosticCount + ' 个输出已建立送电前逐导体预检及逐极接触器状态监测；' +
+        (pilotUnitCount
+          ? pilotUnitCount + ' 个具有物理 CP 触点的接口已建立 CP 发生、高阻采样和车辆二极管检查。'
+          : '当前接口没有物理 CP 触点，相关 CP 功能按标准适用性为 N/A，未虚构 CP 电路。') +
+        ' 候选板级拓扑、元件值、阈值、时序与诊断覆盖仍须由项目工程师计算、验证并批准。',
+      evidence: functionalUnits.map((unit) => unit.id)
+    });
 
     const baseResult = {
       ok: true,
@@ -461,6 +484,7 @@ window.EVSE_ENGINE = (function () {
       bom, bomTotal, bomTotalCny,
       validation, compliance: validation,
       assumptions, warnings, readiness, releaseGate: readiness.release, design,
+      functionalUnitKnowledge,
       calculations: {
         acInput: { kva: r1(inputKva), currentA: r1(inputA), breakerA: acBreakerA },
         dcOutput: { installedKw, mainCurrentA: dcMainA, mainFuseA: dcMainFuseA },

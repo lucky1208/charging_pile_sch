@@ -26,7 +26,7 @@
 
 `engine/` 是浏览器与 CLI 的唯一核心源码。`scripts/sync-web.js` 自动复制模块并按受控依赖顺序生成 bundle；测试逐字节验证同步结果。
 
-## 3. P1：EDEM v4、受控目录与 ERC
+## 3. P1：EDEM v4.1、受控目录与 ERC
 
 ### 两层端口模型
 

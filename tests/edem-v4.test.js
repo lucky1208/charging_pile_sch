@@ -37,8 +37,8 @@ test('EDEM v4 is conductor-level, deterministic, approved, and ERC clean', () =>
   const first = build();
   const second = build();
   const design = first.design;
-  assert.equal(first.engineVersion, '4.0.0');
-  assert.equal(design.schemaVersion, '4.0.0');
+  assert.equal(first.engineVersion, '4.1.0');
+  assert.equal(design.schemaVersion, '4.1.0');
   assert.equal(design.modelValidation.status, 'PASS');
   assert.equal(design.modelValidation.blockingCount, 0);
   assert.equal(design.modelHash, second.design.modelHash);
@@ -84,9 +84,19 @@ test('each connector has distinct DC+, DC-, PE and exact standard signal termina
       connector.terminals.filter((terminal) => terminal.required).forEach((terminal) => assert.ok(netFor(terminal.id), connector.id + ':' + terminal.id));
     });
     if (standard !== 'gb') {
-      const cpCircuits = design.circuits.filter((circuit) => /:CP$/.test(circuit.from + ':' + circuit.fromPort) || /:CP$/.test(circuit.to + ':' + circuit.toPort));
-      const gatewayPorts = cpCircuits.map((circuit) => circuit.from === 'EQ-CTL-A2' ? circuit.fromPort : circuit.toPort);
-      assert.equal(new Set(gatewayPorts).size, 4, 'each gun CP must terminate on a distinct gateway terminal');
+      const pilotUnits = design.topology.functionalUnits.filter((unit) => unit.type === 'CONTROL_PILOT_INTERFACE');
+      assert.equal(pilotUnits.length, 4);
+      assert.equal(new Set(pilotUnits.map((unit) => unit.physicalCpNetId)).size, 4,
+        'each gun must own a distinct physical CP net');
+      const physicalPorts = pilotUnits.map((unit) => {
+        const cpNet = design.nets.find((net) => net.id === unit.physicalCpNetId);
+        assert.ok(cpNet.members.some((member) => member.instanceId === unit.protectedConnectorId && member.terminalId === 'CP'));
+        assert.equal(cpNet.members.filter((member) => unit.instanceIds.includes(member.instanceId)).length, 3);
+        assert.ok(unit.physicalTransceiverTerminal, 'PLC CP requires an explicit gateway physical-layer terminal');
+        assert.ok(cpNet.members.some((member) => member.instanceId === unit.controllerId && member.terminalId === unit.physicalTransceiverTerminal));
+        return unit.controllerId + ':' + unit.physicalTransceiverTerminal;
+      });
+      assert.equal(new Set(physicalPorts).size, 4, 'each gun CP must terminate on a distinct gateway terminal');
     }
   });
 });

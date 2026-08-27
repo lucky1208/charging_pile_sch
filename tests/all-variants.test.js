@@ -223,7 +223,7 @@ test('all 20 standard x archetype variants are ERC-clean, exactly rendered, audi
         assert.equal(result.ok, true, label + ' EVSE_ENGINE build');
         assert.equal(result.standardId, standard, label + ' standard marker');
         assert.equal(result.archetype.id, archetype, label + ' result archetype marker');
-        assert.equal(design.schemaVersion, '4.0.0', label + ' EDEM schema');
+        assert.equal(design.schemaVersion, '4.1.0', label + ' EDEM schema');
         assert.equal(design.modelValidation.status, 'PASS',
           label + ' ERC: ' + JSON.stringify(design.modelValidation.violations));
         assert.equal(design.modelValidation.blockingCount, 0, label + ' ERC blocking count');

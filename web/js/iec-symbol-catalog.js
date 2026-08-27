@@ -19,7 +19,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const SCHEMA = 'evse-iec-symbol-catalog/v1';
   const FALLBACK_SYMBOL_ID = 'evse.function-block.generic';
 
@@ -85,6 +85,11 @@
     , 'rf-antenna': 'iec.communication.rf-antenna'
     , 'nacs-shared-inlet': 'iec.connector.nacs-shared-inlet'
     , 'ac-dc-power-selector': 'iec.switch.ac-dc-power-selector'
+    , 'control-pilot-generator': 'evse.control-pilot.generator'
+    , 'control-pilot-monitor': 'evse.control-pilot.monitor'
+    , 'vehicle-diode-detector': 'evse.control-pilot.diode-detector'
+    , 'output-precheck-monitor': 'evse.safety.output-precheck'
+    , 'contactor-state-monitor': 'evse.safety.contactor-state-monitor'
   });
 
   const CURRENT_DEVICE_KINDS = Object.freeze(Object.keys(KIND_TO_SYMBOL).sort());
@@ -161,6 +166,11 @@
     'iec.communication.rf-antenna': definition('iec.communication.rf-antenna', 'elementary', 'RF antenna', ['IEC-60617-0352'], 'ANT'),
     'iec.connector.nacs-shared-inlet': definition('iec.connector.nacs-shared-inlet', 'elementary', 'Single physical NACS AC/DC shared inlet', ['IEC-60617-0024', 'IEC-60617-0025'], 'NACS'),
     'iec.switch.ac-dc-power-selector': definition('iec.switch.ac-dc-power-selector', 'elementary', 'Double-pole AC/DC power mode selector', ['IEC-60617-0058'], 'QS2'),
+    'evse.control-pilot.generator': definition('evse.control-pilot.generator', 'elementary', 'Control-pilot PWM generator and protected driver', [], 'CP-GEN'),
+    'evse.control-pilot.monitor': definition('evse.control-pilot.monitor', 'elementary', 'High-impedance control-pilot measurement channel', [], 'CP-MON'),
+    'evse.control-pilot.diode-detector': definition('evse.control-pilot.diode-detector', 'elementary', 'Vehicle-side diode presence detector', [], 'DIODE'),
+    'evse.safety.output-precheck': definition('evse.safety.output-precheck', 'elementary', 'Pre-energization output circuit diagnostic', [], 'PRECHECK'),
+    'evse.safety.contactor-state-monitor': definition('evse.safety.contactor-state-monitor', 'elementary', 'Contactor downstream voltage / weld monitor', [], 'WELD'),
     'evse.function-block.generic': definition('evse.function-block.generic', 'function-block', 'Generic controlled function', [], 'FUNC')
   });
 
@@ -364,7 +374,21 @@
       const coilY = b.bottom - Math.max(4, b.h * 0.1);
       b.rect(b.cx - 7, coilY - 2.8, 14, 5.6, 'contactor-coil', { strokeWidth: 1 });
       b.text(b.cx, coilY + 1.4, 'A1  A2', 'coil-label', { height: 8 });
-      b.ports.filter((port) => !isPowerPort(port)).forEach((port) => {
+      const feedbackPorts = b.ports.filter((port) => /FEEDBACK/i.test(String(port.terminalId || port.id || '')));
+      if (feedbackPorts.length) {
+        const auxY = b.top + Math.max(5, b.h * 0.1);
+        const auxLeft = b.cx - 7;
+        const auxRight = b.cx + 7;
+        b.circle(auxLeft, auxY, 1.1, 'auxiliary-fixed-contact', { fill: 'paper', strokeWidth: 0.9 });
+        b.circle(auxRight, auxY, 1.1, 'auxiliary-fixed-contact', { fill: 'paper', strokeWidth: 0.9 });
+        b.line(auxLeft + 1, auxY - 0.2, auxRight - 1, auxY - 3.5,
+          'auxiliary-moving-contact', { strokeWidth: 1.05 });
+        b.line(b.cx, auxY + 2, b.cx, coilY - 3,
+          'mechanical-linkage', { strokeWidth: 0.65, dash: '3,2' });
+        feedbackPorts.forEach((port) => b.lead(port,
+          port.x <= b.cx ? auxLeft : auxRight, auxY, 'feedback-contact-lead'));
+      }
+      b.ports.filter((port) => !isPowerPort(port) && !/FEEDBACK/i.test(String(port.terminalId || port.id || ''))).forEach((port) => {
         const isLeft = String(port.side || '').toUpperCase() === 'LEFT' || port.x <= b.cx;
         b.lead(port, isLeft ? b.cx - 7 : b.cx + 7, coilY, 'coil-lead');
       });
@@ -838,6 +862,210 @@
       Math.max(b.cy - radius * 0.45, Math.min(b.cy + radius * 0.45, port.y)), 'lamp-lead'));
   }
 
+  function drawAmplifierTriangle(b, x, y, width, height, role) {
+    const left = x - width / 2;
+    const right = x + width / 2;
+    b.polyline([
+      { x: left, y: y - height / 2 },
+      { x: left, y: y + height / 2 },
+      { x: right, y }
+    ], role || 'amplifier', { fill: 'paper', strokeWidth: 1.2 }, true);
+    b.text(left + 3.2, y - height * 0.2, '+', (role || 'amplifier') + '-positive', { height: 8, weight: 'bold' });
+    b.text(left + 3.2, y + height * 0.27, '−', (role || 'amplifier') + '-negative', { height: 8, weight: 'bold' });
+    return { left, right, top: y - height / 2, bottom: y + height / 2 };
+  }
+
+  function drawOptocoupler(b, x, y, width, height, role) {
+    const left = x - width / 2;
+    const top = y - height / 2;
+    const right = x + width / 2;
+    b.rect(left, top, width, height, role || 'optocoupler-boundary', { fill: 'paper', strokeWidth: 1.05 });
+    b.polyline([
+      { x: left + width * 0.16, y: y - height * 0.16 },
+      { x: left + width * 0.34, y },
+      { x: left + width * 0.16, y: y + height * 0.16 }
+    ], (role || 'optocoupler') + '-led', { strokeWidth: 1 }, true);
+    b.line(left + width * 0.37, y - height * 0.2, left + width * 0.37, y + height * 0.2,
+      (role || 'optocoupler') + '-cathode', { strokeWidth: 1 });
+    b.line(left + width * 0.45, y - height * 0.2, left + width * 0.58, y - height * 0.1,
+      (role || 'optocoupler') + '-light', { strokeWidth: 0.65, dash: '2,2' });
+    b.line(left + width * 0.45, y + height * 0.1, left + width * 0.58, y,
+      (role || 'optocoupler') + '-light', { strokeWidth: 0.65, dash: '2,2' });
+    b.line(left + width * 0.67, y - height * 0.24, left + width * 0.67, y + height * 0.24,
+      (role || 'optocoupler') + '-transistor-base', { strokeWidth: 1 });
+    b.line(left + width * 0.67, y - height * 0.1, right - width * 0.12, y - height * 0.28,
+      (role || 'optocoupler') + '-collector', { strokeWidth: 1 });
+    b.line(left + width * 0.67, y + height * 0.1, right - width * 0.12, y + height * 0.28,
+      (role || 'optocoupler') + '-emitter', { strokeWidth: 1 });
+    return { left, right, top, bottom: top + height };
+  }
+
+  function drawPilotGenerator(builder) {
+    const b = builder;
+    const sourceX = b.left + b.w * 0.17;
+    const ampX = b.left + b.w * 0.48;
+    const stageX = b.left + b.w * 0.76;
+    const radius = Math.max(5, Math.min(8, b.h * 0.16));
+    b.circle(sourceX, b.cy, radius, 'pwm-source', { fill: 'paper', strokeWidth: 1.15 });
+    b.polyline([
+      { x: sourceX - radius * 0.65, y: b.cy + radius * 0.25 },
+      { x: sourceX - radius * 0.25, y: b.cy + radius * 0.25 },
+      { x: sourceX - radius * 0.25, y: b.cy - radius * 0.3 },
+      { x: sourceX + radius * 0.25, y: b.cy - radius * 0.3 },
+      { x: sourceX + radius * 0.25, y: b.cy + radius * 0.25 },
+      { x: sourceX + radius * 0.65, y: b.cy + radius * 0.25 }
+    ], 'pwm-waveform', { strokeWidth: 1 });
+    const amp = drawAmplifierTriangle(b, ampX, b.cy, Math.max(17, b.w * 0.2), Math.max(18, b.h * 0.36), 'pilot-amplifier');
+    b.line(sourceX + radius, b.cy, amp.left, b.cy, 'pwm-to-amplifier');
+    const transistorRadius = Math.max(4, Math.min(6, b.h * 0.11));
+    [b.cy - transistorRadius * 1.35, b.cy + transistorRadius * 1.35].forEach((y, index) => {
+      b.circle(stageX, y, transistorRadius, index ? 'push-pull-lower-transistor' : 'push-pull-upper-transistor', { fill: 'paper', strokeWidth: 1 });
+      b.line(stageX - transistorRadius, y, stageX - transistorRadius * 0.25, y, 'transistor-base');
+      b.line(stageX - transistorRadius * 0.25, y - transistorRadius * 0.45,
+        stageX + transistorRadius * 0.72, y - transistorRadius * 0.8, 'transistor-collector');
+      b.line(stageX - transistorRadius * 0.25, y + transistorRadius * 0.45,
+        stageX + transistorRadius * 0.72, y + transistorRadius * 0.8, 'transistor-emitter');
+      if (index) b.polyline([
+        { x: stageX + transistorRadius * 0.42, y: y + transistorRadius * 0.62 },
+        { x: stageX + transistorRadius * 0.14, y: y + transistorRadius * 0.38 },
+        { x: stageX + transistorRadius * 0.52, y: y + transistorRadius * 0.28 }
+      ], 'pnp-emitter-arrow', { fill: 'ink', strokeWidth: 0.6 }, true);
+      else b.polyline([
+        { x: stageX + transistorRadius * 0.58, y: y + transistorRadius * 0.75 },
+        { x: stageX + transistorRadius * 0.28, y: y + transistorRadius * 0.5 },
+        { x: stageX + transistorRadius * 0.68, y: y + transistorRadius * 0.4 }
+      ], 'npn-emitter-arrow', { fill: 'ink', strokeWidth: 0.6 }, true);
+    });
+    b.line(amp.right, b.cy, stageX - transistorRadius, b.cy, 'amplifier-to-output-stage');
+    b.line(stageX + transistorRadius * 0.75, b.cy - transistorRadius * 2.15,
+      stageX + transistorRadius * 0.75, b.cy + transistorRadius * 2.15, 'push-pull-output-node');
+    b.circle(stageX + transistorRadius * 0.75, b.cy, 1.2, 'output-junction', { fill: 'ink', strokeWidth: 0.4 });
+    b.ports.forEach((port) => {
+      const terminal = String(port.terminalId || port.id || '');
+      if (terminal === 'PWM_CMD') b.lead(port, sourceX - radius, b.cy, 'pwm-command-lead');
+      else if (terminal === 'CP_OUT') b.lead(port, stageX + transistorRadius * 0.75, b.cy, 'cp-output-lead');
+      else if (/V24_0V/.test(terminal)) b.lead(port, stageX, b.cy + transistorRadius * 2.15, 'driver-return');
+      else if (/V24/.test(terminal)) b.lead(port, stageX, b.cy - transistorRadius * 2.15, 'driver-supply');
+    });
+    b.text(stageX, b.bottom - 1.5, 'PWM → ±CP', 'pilot-function', { height: 8, weight: 'bold' });
+  }
+
+  function drawPilotMonitor(builder) {
+    const b = builder;
+    const inputX = b.left + b.w * 0.13;
+    const resistorLeft = b.left + b.w * 0.22;
+    const resistorRight = b.left + b.w * 0.36;
+    const ampX = b.left + b.w * 0.58;
+    const adcX = b.left + b.w * 0.82;
+    b.line(inputX, b.cy, resistorLeft, b.cy, 'high-impedance-sense-lead');
+    b.rect(resistorLeft, b.cy - 3, resistorRight - resistorLeft, 6, 'sense-divider-resistor', { fill: 'paper', strokeWidth: 1.05 });
+    b.line(resistorRight, b.cy, ampX - b.w * 0.11, b.cy, 'divider-to-buffer');
+    const amp = drawAmplifierTriangle(b, ampX, b.cy, Math.max(18, b.w * 0.22), Math.max(18, b.h * 0.36), 'pilot-buffer');
+    b.rect(adcX - 7, b.cy - 7, 14, 14, 'adc-sampler', { fill: 'paper', strokeWidth: 1.05 });
+    b.text(adcX, b.cy + 1.8, 'ADC', 'adc-label', { height: 8, weight: 'bold' });
+    b.line(amp.right, b.cy, adcX - 7, b.cy, 'buffer-to-adc');
+    b.ports.forEach((port) => {
+      const terminal = String(port.terminalId || port.id || '');
+      if (terminal === 'CP_SENSE') b.lead(port, inputX, b.cy, 'cp-sense-lead');
+      else if (terminal === 'CP_VALUE') b.lead(port, adcX + 7, b.cy, 'measured-value-lead');
+      else if (/V24_0V/.test(terminal)) b.lead(port, ampX, amp.bottom, 'buffer-return');
+      else if (/V24/.test(terminal)) b.lead(port, ampX, amp.top, 'buffer-supply');
+    });
+    b.text(b.cx, b.bottom - 1.5, '高阻采样', 'monitor-function', { height: 8, weight: 'bold' });
+  }
+
+  function drawVehicleDiodeDetector(builder) {
+    const b = builder;
+    const diodeX = b.left + b.w * 0.26;
+    const comparatorX = b.left + b.w * 0.58;
+    const optoX = b.left + b.w * 0.83;
+    const diodeHalf = Math.max(4, Math.min(7, b.h * 0.12));
+    b.polyline([
+      { x: diodeX - diodeHalf, y: b.cy - diodeHalf },
+      { x: diodeX + diodeHalf * 0.45, y: b.cy },
+      { x: diodeX - diodeHalf, y: b.cy + diodeHalf }
+    ], 'vehicle-diode-test-symbol', { fill: 'paper', strokeWidth: 1.1 }, true);
+    b.line(diodeX + diodeHalf * 0.5, b.cy - diodeHalf, diodeX + diodeHalf * 0.5, b.cy + diodeHalf,
+      'diode-cathode', { strokeWidth: 1.2 });
+    const comp = drawAmplifierTriangle(b, comparatorX, b.cy, Math.max(18, b.w * 0.2), Math.max(18, b.h * 0.36), 'diode-comparator');
+    b.line(diodeX + diodeHalf * 0.5, b.cy, comp.left, b.cy, 'diode-to-comparator');
+    const opto = drawOptocoupler(b, optoX, b.cy, Math.max(20, b.w * 0.18), Math.max(20, b.h * 0.4), 'diode-result-isolation');
+    b.line(comp.right, b.cy, opto.left, b.cy, 'comparator-to-isolation');
+    b.ports.forEach((port) => {
+      const terminal = String(port.terminalId || port.id || '');
+      if (terminal === 'CP_SENSE') b.lead(port, diodeX - diodeHalf, b.cy, 'diode-sense-lead');
+      else if (terminal === 'DIODE_OK') b.lead(port, opto.right, b.cy, 'diode-result-lead');
+      else if (/V24_0V/.test(terminal)) b.lead(port, comparatorX, comp.bottom, 'detector-return');
+      else if (/V24/.test(terminal)) b.lead(port, comparatorX, comp.top, 'detector-supply');
+    });
+    b.text(b.cx, b.bottom - 1.5, 'D? → 判决', 'diode-function', { height: 8, weight: 'bold' });
+  }
+
+  function drawOutputPrecheck(builder) {
+    const b = builder;
+    const sensePorts = b.ports.filter((port) => /^SENSE_/.test(String(port.terminalId || port.id || '')));
+    const rows = sensePorts.length > 1 ? sensePorts.map((port, index) =>
+      b.cy + (index - (sensePorts.length - 1) / 2) * Math.max(5, Math.min(8, b.h * 0.14))) : [b.cy];
+    const contactLeft = b.left + b.w * 0.17;
+    const contactRight = b.left + b.w * 0.33;
+    rows.forEach((y, index) => {
+      b.circle(contactLeft, y, 1.15, 'test-relay-fixed-contact', { fill: 'paper', strokeWidth: 0.9 });
+      b.circle(contactRight, y, 1.15, 'test-relay-fixed-contact', { fill: 'paper', strokeWidth: 0.9 });
+      b.line(contactLeft + 1.2, y - 0.2, contactRight - 1.2, y - 3,
+        'test-relay-moving-contact', { strokeWidth: 1.05 });
+      if (sensePorts[index]) b.lead(sensePorts[index], contactLeft, y, 'precheck-sense-lead');
+    });
+    if (rows.length > 1) b.line((contactLeft + contactRight) / 2, rows[0] + 2,
+      (contactLeft + contactRight) / 2, rows[rows.length - 1] - 2, 'test-relay-mechanical-link', { dash: '3,2', strokeWidth: 0.75 });
+    const resistorX = b.left + b.w * 0.43;
+    const resistorW = Math.max(12, b.w * 0.12);
+    b.rect(resistorX, b.cy - 3, resistorW, 6, 'test-current-limiter', { fill: 'paper', strokeWidth: 1 });
+    rows.forEach((y) => b.line(contactRight, y, resistorX, b.cy, 'test-network-branch', { strokeWidth: 0.8 }));
+    const opto = drawOptocoupler(b, b.left + b.w * 0.68, b.cy, Math.max(22, b.w * 0.2), Math.max(22, b.h * 0.45), 'precheck-isolation');
+    b.line(resistorX + resistorW, b.cy, opto.left, b.cy, 'limited-test-current');
+    const resultX = b.left + b.w * 0.88;
+    b.line(opto.right, b.cy, resultX, b.cy, 'precheck-result');
+    b.ports.filter((port) => !/^SENSE_/.test(String(port.terminalId || port.id || ''))).forEach((port) => {
+      const terminal = String(port.terminalId || port.id || '');
+      if (terminal === 'TEST_ENABLE') b.lead(port, (contactLeft + contactRight) / 2, rows[0] - 4, 'test-enable-lead');
+      else if (terminal === 'TEST_RESULT') b.lead(port, resultX, b.cy, 'test-result-lead');
+      else if (/V24_0V/.test(terminal)) b.lead(port, optoXSafe(opto, 'right'), opto.bottom, 'precheck-return');
+      else if (/V24/.test(terminal)) b.lead(port, optoXSafe(opto, 'right'), opto.top, 'precheck-supply');
+    });
+    b.text(b.cx, b.bottom - 1.5, '先检测 · 后合闸', 'precheck-function', { height: 8, weight: 'bold' });
+  }
+
+  function optoXSafe(opto, side) {
+    return side === 'left' ? opto.left : opto.right;
+  }
+
+  function drawContactorStateMonitor(builder) {
+    const b = builder;
+    const sensePorts = b.ports.filter((port) => /^SENSE_/.test(String(port.terminalId || port.id || '')));
+    const startX = b.left + b.w * 0.13;
+    const resistorX = b.left + b.w * 0.25;
+    const resistorW = Math.max(14, b.w * 0.15);
+    sensePorts.forEach((port, index) => {
+      const y = b.cy + (index - (sensePorts.length - 1) / 2) * Math.max(5, Math.min(8, b.h * 0.14));
+      b.lead(port, startX, y, 'weld-sense-lead');
+      b.line(startX, y, resistorX, y, 'high-voltage-sense-lead');
+      b.rect(resistorX, y - 2.2, resistorW, 4.4, 'high-value-divider-resistor', { fill: 'paper', strokeWidth: 0.9 });
+      b.line(resistorX + resistorW, y, b.left + b.w * 0.48, b.cy, 'divider-summing-lead', { strokeWidth: 0.75 });
+    });
+    const opto = drawOptocoupler(b, b.left + b.w * 0.62, b.cy, Math.max(23, b.w * 0.22), Math.max(22, b.h * 0.46), 'weld-monitor-isolation');
+    b.line(b.left + b.w * 0.48, b.cy, opto.left, b.cy, 'divider-to-isolation');
+    const comp = drawAmplifierTriangle(b, b.left + b.w * 0.84, b.cy,
+      Math.max(17, b.w * 0.16), Math.max(18, b.h * 0.36), 'weld-state-comparator');
+    b.line(opto.right, b.cy, comp.left, b.cy, 'isolation-to-comparator');
+    b.ports.filter((port) => !/^SENSE_/.test(String(port.terminalId || port.id || ''))).forEach((port) => {
+      const terminal = String(port.terminalId || port.id || '');
+      if (terminal === 'WELD_STATUS') b.lead(port, comp.right, b.cy, 'weld-status-lead');
+      else if (/V24_0V/.test(terminal)) b.lead(port, comp.left, comp.bottom, 'state-monitor-return');
+      else if (/V24/.test(terminal)) b.lead(port, comp.left, comp.top, 'state-monitor-supply');
+    });
+    b.text(b.cx, b.bottom - 1.5, '命令断开时评估', 'weld-function', { height: 8, weight: 'bold' });
+  }
+
   function drawFunctionBlock(builder, definitionValue) {
     const secondary = definitionValue.iecReferences.length ? definitionValue.iecReferences[0].replace('IEC-60617-', 'IEC ') : '';
     builder.frame(definitionValue.functionCode, secondary);
@@ -894,6 +1122,11 @@
       case 'iec.communication.rf-antenna': drawRfAntenna(builder); break;
       case 'iec.connector.nacs-shared-inlet': drawNacsSharedInlet(builder); break;
       case 'iec.switch.ac-dc-power-selector': drawAcDcPowerSelector(builder); break;
+      case 'evse.control-pilot.generator': drawPilotGenerator(builder); break;
+      case 'evse.control-pilot.monitor': drawPilotMonitor(builder); break;
+      case 'evse.control-pilot.diode-detector': drawVehicleDiodeDetector(builder); break;
+      case 'evse.safety.output-precheck': drawOutputPrecheck(builder); break;
+      case 'evse.safety.contactor-state-monitor': drawContactorStateMonitor(builder); break;
       default: drawFunctionBlock(builder, definitionValue); break;
     }
   }

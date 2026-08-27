@@ -8,7 +8,7 @@
 window.EVSE_DESIGN = (function () {
   'use strict';
 
-  const SCHEMA_VERSION = '4.0.0';
+  const SCHEMA_VERSION = '4.1.0';
   const DOCUMENT_STATUS = 'CONCEPT_DRAFT—PROFESSIONAL_REVIEW_REQUIRED';
   const IMPLEMENTED_STANDARDS = Object.freeze(['gb', 'eu', 'us', 'nacs', 'chademo']);
   const IMPLEMENTED_ARCHETYPES = Object.freeze(['dc-integrated', 'dc-split', 'ac-dc-combo', 'ess-mobile']);
@@ -335,6 +335,211 @@ window.EVSE_DESIGN = (function () {
     });
   }
 
+  function outputControlContract(profileId, cpCapable, interfaceRole, evidenceRefs) {
+    const library = window.EVSE_FUNCTIONAL_UNIT_LIBRARY;
+    if (!library || typeof library.controlContract !== 'function') {
+      throw new Error('EVSE_FUNCTIONAL_UNIT_LIBRARY 未加载，不能建立输出控制功能合同。');
+    }
+    return library.controlContract({
+      profileId,
+      cpCapable: cpCapable === true,
+      interfaceRole: interfaceRole || 'CHARGING_OUTPUT',
+      evidenceRefs: evidenceRefs || []
+    });
+  }
+
+  function addControlPilotAssembly(builder, options) {
+    const o = options || {};
+    const connectorTerminal = builder.terminal(endpoint(o.connectorId, 'CP'));
+    const cpContext = {
+      cpNetClass: connectorTerminal.netClass,
+      cpDomain: connectorTerminal.domain,
+      cpProtocol: connectorTerminal.protocol,
+      cpSignalRole: connectorTerminal.signalRole
+    };
+    const startNet = builder.nets.length;
+    const startCircuit = builder.circuits.length;
+    const metadata = {
+      protectedConnectorId: o.connectorId,
+      branchId: o.branchId,
+      implementationLevel: 'CONTROL_BOARD_FUNCTION',
+      implementationStatus: 'FUNCTIONAL_REQUIREMENT—BOARD_TOPOLOGY_AND_VALUES_UNRESOLVED',
+      candidateKnowledgeRef: 'EVSE_FUNCTIONAL_UNIT_LIBRARY@1.0.0',
+      automaticVariantSelectionAllowed: false
+    };
+    const generator = o.add(o.idPrefix + '-CP-GEN', 'CPG' + o.tagSuffix,
+      'control-pilot-generator', '接口 ' + o.displayName + ' CP 信号发生', 'safety-diagnostic', cpContext,
+      Object.assign({}, metadata, { functionalUnitIds: ['cp_gen'], variantRef: null }));
+    const monitor = o.add(o.idPrefix + '-CP-MON', 'CPM' + o.tagSuffix,
+      'control-pilot-monitor', '接口 ' + o.displayName + ' CP 高阻采样', 'safety-diagnostic', cpContext,
+      Object.assign({}, metadata, { functionalUnitIds: ['cp_det'], variantRef: null }));
+    const diode = o.add(o.idPrefix + '-DIODE', 'DIO' + o.tagSuffix,
+      'vehicle-diode-detector', '接口 ' + o.displayName + ' 车辆二极管检测', 'safety-diagnostic', cpContext,
+      Object.assign({}, metadata, { functionalUnitIds: ['diode_det'], variantRef: null }));
+    [generator, monitor, diode].forEach((instanceId) => addAuxTarget(o.aux24, instanceId, 'PWR_V24', 'PWR_V24_0V'));
+
+    connectFixedToDynamic(builder, o.displayName + ' CP PWM 命令', endpoint(generator, 'PWM_CMD'),
+      o.controllerId, o.controlPrefix + '_CP_PWM_CMD', 'out');
+    connectFixedToDynamic(builder, o.displayName + ' CP 采样值', endpoint(monitor, 'CP_VALUE'),
+      o.controllerId, o.controlPrefix + '_CP_VALUE', 'in');
+    connectFixedToDynamic(builder, o.displayName + ' 车辆二极管结果', endpoint(diode, 'DIODE_OK'),
+      o.controllerId, o.controlPrefix + '_DIODE_OK', 'in');
+
+    const members = [
+      endpoint(generator, 'CP_OUT'), endpoint(o.connectorId, 'CP'),
+      endpoint(monitor, 'CP_SENSE'), endpoint(diode, 'CP_SENSE')
+    ];
+    const edges = [
+      [endpoint(generator, 'CP_OUT'), endpoint(o.connectorId, 'CP'), { functionalRole: 'CONTROL_PILOT_DRIVE' }],
+      [endpoint(o.connectorId, 'CP'), endpoint(monitor, 'CP_SENSE'), { functionalRole: 'HIGH_IMPEDANCE_CP_MEASUREMENT' }],
+      [endpoint(o.connectorId, 'CP'), endpoint(diode, 'CP_SENSE'), { functionalRole: 'VEHICLE_DIODE_MEASUREMENT' }]
+    ];
+    let physicalTransceiverTerminal = null;
+    if (connectorTerminal.netClass === 'SIGNAL_COMM') {
+      physicalTransceiverTerminal = o.controlPrefix + '_CP_PHYSICAL';
+      builder.ensureTerminal(o.controllerId, physicalTransceiverTerminal, Object.assign({}, connectorTerminal, {
+        id: physicalTransceiverTerminal, label: physicalTransceiverTerminal,
+        direction: 'bidirectional', required: true, multiplicity: 'one'
+      }));
+      members.push(endpoint(o.controllerId, physicalTransceiverTerminal));
+      edges.push([endpoint(o.connectorId, 'CP'), endpoint(o.controllerId, physicalTransceiverTerminal), {
+        functionalRole: 'CP_PLC_PHYSICAL_LAYER'
+      }]);
+    }
+    const cpNet = builder.addNode(o.displayName + ' 物理 CP 导体', semanticsForTerminal(connectorTerminal), members, edges);
+    return {
+      id: 'FU-' + o.branchId + '-CONTROL-PILOT',
+      type: 'CONTROL_PILOT_INTERFACE',
+      branchId: o.branchId,
+      protectedConnectorId: o.connectorId,
+      controllerId: o.controllerId,
+      functions: ['CP_GENERATION', 'CP_MONITORING', 'VEHICLE_DIODE_CHECK'],
+      instanceIds: [generator, monitor, diode],
+      netIds: builder.nets.slice(startNet).map((net) => net.id),
+      circuitIds: builder.circuits.slice(startCircuit).map((circuit) => circuit.id),
+      physicalCpNetId: cpNet.id,
+      physicalTransceiverTerminal,
+      lifecycle: 'APPROVED',
+      implementationStatus: 'FUNCTIONAL_REQUIREMENT—BOARD_TOPOLOGY_AND_VALUES_UNRESOLVED',
+      variantRefs: { cp_gen: null, cp_det: null, diode_det: null },
+      stateApplicability: ['ALL_OPEN', 'PRECHECK', 'READY', 'ENERGIZED'],
+      failureAction: 'INHIBIT_ENERGY_TRANSFER'
+    };
+  }
+
+  function addOutputDiagnosticAssembly(builder, options) {
+    const o = options || {};
+    const metadata = {
+      protectedConnectorId: o.connectorId,
+      branchId: o.branchId,
+      safeIsolationDeviceIds: o.safeIsolationDeviceIds.slice(),
+      implementationLevel: 'SAFETY_DIAGNOSTIC_FUNCTION',
+      implementationStatus: 'FUNCTIONAL_REQUIREMENT—BOARD_TOPOLOGY_THRESHOLDS_AND_TIMING_UNRESOLVED',
+      candidateKnowledgeRef: 'EVSE_FUNCTIONAL_UNIT_LIBRARY@1.0.0',
+      automaticVariantSelectionAllowed: false,
+      failureAction: 'INHIBIT_ENERGY_TRANSFER'
+    };
+    const precheck = o.add(o.idPrefix + '-PRECHECK', 'SC' + o.tagSuffix,
+      'output-precheck-monitor', o.displayName + ' 送电前输出预检', 'safety-diagnostic', o.powerContext,
+      Object.assign({}, metadata, {
+        functionalUnitIds: ['sc_det'], variantRef: null,
+        defaultState: 'TEST_PATH_ISOLATED', evaluationState: 'MAIN_CONTACTORS_OPEN',
+        requiredSequence: ['MAIN_CONTACTORS_OPEN', 'ENABLE_TEST_PATH', 'EVALUATE_RESULT', 'DISABLE_AND_ISOLATE_TEST_PATH']
+      }));
+    const stateMonitor = o.add(o.idPrefix + '-WELD-MON', 'AD' + o.tagSuffix,
+      'contactor-state-monitor', o.displayName + ' 接触器逐极状态/粘连监测', 'safety-diagnostic', o.powerContext,
+      Object.assign({}, metadata, {
+        functionalUnitIds: ['adh_det'], variantRef: null,
+        evaluationState: 'CONTACTORS_COMMAND_OPEN', monitoredPoles: o.monitoredPoles.map(clone)
+      }));
+    [precheck, stateMonitor].forEach((instanceId) => addAuxTarget(o.aux24, instanceId, 'PWR_V24', 'PWR_V24_0V'));
+    connectFixedToDynamic(builder, o.displayName + ' 输出预检使能', endpoint(precheck, 'TEST_ENABLE'),
+      o.controllerId, o.controlPrefix + '_PRECHECK_ENABLE', 'out');
+    connectFixedToDynamic(builder, o.displayName + ' 输出预检结果', endpoint(precheck, 'TEST_RESULT'),
+      o.controllerId, o.controlPrefix + '_PRECHECK_RESULT', 'in');
+    connectFixedToDynamic(builder, o.displayName + ' 粘连监测结果', endpoint(stateMonitor, 'WELD_STATUS'),
+      o.controllerId, o.controlPrefix + '_WELD_STATUS', 'in');
+    return {
+      id: 'FU-' + o.branchId + '-OUTPUT-DIAGNOSTICS',
+      type: 'OUTPUT_SAFETY_DIAGNOSTICS',
+      branchId: o.branchId,
+      protectedConnectorId: o.connectorId,
+      controllerId: o.controllerId,
+      safeIsolationDeviceIds: o.safeIsolationDeviceIds.slice(),
+      monitoredPoles: o.monitoredPoles.map(clone),
+      functions: ['OUTPUT_PREENERGIZATION_CHECK', 'CONTACTOR_STATE_MONITORING'],
+      instanceIds: [precheck, stateMonitor],
+      precheckInstanceId: precheck,
+      stateMonitorInstanceId: stateMonitor,
+      lifecycle: 'APPROVED',
+      implementationStatus: 'FUNCTIONAL_REQUIREMENT—BOARD_TOPOLOGY_THRESHOLDS_AND_TIMING_UNRESOLVED',
+      variantRefs: { sc_det: null, adh_det: null },
+      defaultState: 'TEST_PATH_ISOLATED',
+      precheckEvaluationState: 'MAIN_CONTACTORS_OPEN',
+      weldEvaluationState: 'CONTACTORS_COMMAND_OPEN',
+      failureAction: 'INHIBIT_ENERGY_TRANSFER'
+    };
+  }
+
+  function finishOutputDiagnosticAssembly(builder, assembly, monitoredOutputEndpoints) {
+    const ownedInstanceIds = new Set([assembly.precheckInstanceId, assembly.stateMonitorInstanceId]);
+    const out = Object.assign({}, assembly, {
+      monitoredOutputEndpoints: monitoredOutputEndpoints.map(clone),
+      netIds: builder.nets.filter((net) => net.members.some((member) => ownedInstanceIds.has(member.instanceId))).map((net) => net.id),
+      circuitIds: builder.circuits.filter((circuit) => ownedInstanceIds.has(circuit.from) || ownedInstanceIds.has(circuit.to)).map((circuit) => circuit.id)
+    });
+    return out;
+  }
+
+  function safetyStateMachine(branchContracts) {
+    const branches = (branchContracts || []).map((branch) => ({
+      branchId: branch.branchId,
+      connectorId: branch.connectorId,
+      safeIsolationDeviceIds: branch.safeIsolationDeviceIds.slice(),
+      controlPilotRequired: branch.controlPilotRequired === true,
+      outputDiagnosticFunctionalUnitId: branch.outputDiagnosticFunctionalUnitId,
+      controlPilotFunctionalUnitId: branch.controlPilotFunctionalUnitId || null
+    }));
+    const isolationDevices = Array.from(new Set(branches.flatMap((branch) => branch.safeIsolationDeviceIds))).sort();
+    return {
+      schema: 'EVSE-SAFETY-STATE/1.0',
+      status: 'FUNCTIONAL_SEQUENCE_ONLY—PROJECT_THRESHOLDS_TIMING_AND_CERTIFICATION_REQUIRED',
+      defaultState: 'ALL_OPEN',
+      faultState: 'FAULT_ALL_OPEN',
+      states: [
+        { id: 'ALL_OPEN', contactorCommand: 'OPEN', activeFunctions: [] },
+        { id: 'PRECHECK', contactorCommand: 'OPEN', activeFunctions: ['OUTPUT_PREENERGIZATION_CHECK'] },
+        { id: 'READY', contactorCommand: 'OPEN', activeFunctions: ['CONTACTOR_STATE_MONITORING'] },
+        { id: 'ENERGIZED', contactorCommand: 'CLOSED', activeFunctions: ['CONTROL_PILOT_MONITORING'] },
+        { id: 'FAULT_ALL_OPEN', contactorCommand: 'OPEN', activeFunctions: ['CONTACTOR_STATE_MONITORING'] }
+      ],
+      transitions: [
+        { id: 'T-OPEN-TO-PRECHECK', from: 'ALL_OPEN', to: 'PRECHECK',
+          guards: [{ type: 'OUTPUT_DEENERGIZED', expected: true }],
+          actions: [{ type: 'ENABLE_OUTPUT_PRECHECK' }] },
+        { id: 'T-PRECHECK-TO-READY', from: 'PRECHECK', to: 'READY',
+          guards: [{ type: 'ALL_APPLICABLE_PRECHECKS_PASS', expected: true }, { type: 'TEST_PATH_ISOLATED', expected: true }],
+          actions: [{ type: 'DISABLE_OUTPUT_PRECHECK' }] },
+        { id: 'T-READY-TO-ENERGIZED', from: 'READY', to: 'ENERGIZED',
+          guards: [{ type: 'CONTACTOR_OPEN_FEEDBACK_VALID', expected: true }, { type: 'INTERFACE_PERMISSION_VALID', expected: true }],
+          actions: isolationDevices.map((deviceId) => ({ type: 'COMMAND_CONTACTOR_CLOSED', deviceId })) },
+        { id: 'T-ENERGIZED-TO-OPEN', from: 'ENERGIZED', to: 'ALL_OPEN', guards: [],
+          actions: isolationDevices.map((deviceId) => ({ type: 'COMMAND_CONTACTOR_OPEN', deviceId })) },
+        { id: 'T-ANY-TO-FAULT', from: '*', to: 'FAULT_ALL_OPEN',
+          guards: [{ type: 'SAFETY_FAULT', expected: true }],
+          actions: isolationDevices.map((deviceId) => ({ type: 'COMMAND_CONTACTOR_OPEN', deviceId })) }
+      ],
+      branches,
+      projectSettings: [
+        { id: 'OUTPUT_PRECHECK_THRESHOLD', value: null, unit: 'PROJECT_DEFINED', status: 'PROJECT_VALUE_REQUIRED', sourceRef: null, calculationRef: null },
+        { id: 'OUTPUT_PRECHECK_TIMEOUT', value: null, unit: 'ms', status: 'PROJECT_VALUE_REQUIRED', sourceRef: null, calculationRef: null },
+        { id: 'CONTACTOR_WELD_THRESHOLD', value: null, unit: 'V', status: 'PROJECT_VALUE_REQUIRED', sourceRef: null, calculationRef: null }
+      ],
+      unresolvedValuesArePass: false,
+      executionAllowed: false
+    };
+  }
+
   function ensureSignal(builder, instanceId, terminalId, options) {
     return builder.ensureTerminal(instanceId, terminalId, Object.assign({
       netClass: 'SIGNAL_CTRL', domain: 'CONTROL', direction: 'bidirectional',
@@ -376,6 +581,8 @@ window.EVSE_DESIGN = (function () {
     const mobileObjects = [];
     const moduleIds = [];
     const gunEquipment = [];
+    const functionalUnits = [];
+    const safetyBranches = [];
     const add = (id, tag, kind, name, system, context, extra) => builder.addInstance(Object.assign({
       id, tag, ref: 'EVSE-' + String(system || 'SYS').toUpperCase() + '-' + tag,
       referenceDesignation: 'EVSE-' + String(system || 'SYS').toUpperCase() + '-' + tag,
@@ -727,7 +934,9 @@ window.EVSE_DESIGN = (function () {
     guns.forEach((gun, index) => {
       const number = index + 1;
       const suffix = number === 1 ? '' : '-' + number;
-      const k7 = add('EQ-MOB-K7' + suffix, number === 1 ? 'K7' : 'K7-' + number, 'dc-contactor', '枪 ' + number + ' 正接触器 K7（200A / 24V线圈）', 'gun', { polarity: 'POSITIVE' }, Object.assign({ gun: number }, contactorRating(200, 'OBSERVED')));
+      const k7 = add('EQ-MOB-K7' + suffix, number === 1 ? 'K7' : 'K7-' + number, 'dc-contactor', '枪 ' + number + ' 正接触器 K7（200A / 24V线圈）', 'gun', {
+        polarity: 'POSITIVE', feedbackRequired: true, feedbackSignalRole: 'G' + number + ':POSITIVE_CONTACTOR_FEEDBACK'
+      }, Object.assign({ gun: number, requiredForSafeIsolation: true, poleId: 'DC_POS' }, contactorRating(200, 'OBSERVED')));
       const fu2RatedA = Number(gun.fuseA);
       const fu2 = add('EQ-MOB-FU2' + suffix, number === 1 ? 'FU2' : 'FU2-' + number, 'dc-fuse', '枪 ' + number + ' 输出快熔 FU2', 'gun', { polarity: 'POSITIVE' }, Object.assign({ gun: number },
         evidenceRating(Number.isFinite(fu2RatedA) ? fu2RatedA : null, Number.isFinite(fu2RatedA) ? 'CALCULATED' : 'UNKNOWN',
@@ -741,19 +950,48 @@ window.EVSE_DESIGN = (function () {
         gun: number, spec: std.meter, communicationProtocol: 'UNKNOWN', mainPowerPath: false,
         auxiliarySupplyStatus: 'OBSERVED_VOLTAGE_UNRESOLVED—OPTIONAL_TERMINALS_OPEN'
       });
-      const k8 = add('EQ-MOB-K8' + suffix, number === 1 ? 'K8' : 'K8-' + number, 'dc-contactor', '枪 ' + number + ' 负接触器 K8（200A / 24V线圈）', 'gun', { polarity: 'NEGATIVE' }, Object.assign({ gun: number }, contactorRating(200, 'OBSERVED')));
+      const k8 = add('EQ-MOB-K8' + suffix, number === 1 ? 'K8' : 'K8-' + number, 'dc-contactor', '枪 ' + number + ' 负接触器 K8（200A / 24V线圈）', 'gun', {
+        polarity: 'NEGATIVE', feedbackRequired: true, feedbackSignalRole: 'G' + number + ':NEGATIVE_CONTACTOR_FEEDBACK'
+      }, Object.assign({ gun: number, requiredForSafeIsolation: true, poleId: 'DC_NEG' }, contactorRating(200, 'OBSERVED')));
       const connector = add('EQ-MOB-G' + number + '-XS', gun.tag || ('XS' + number), 'charge-connector', std.name + ' 直流充电枪 ' + number, 'gun', {
         connectorType: std.connectorType, protocol: std.protocol, physicalLayer: std.physicalLayer
-      }, { gun: number, currentA: gun.currentA, connectorType: std.connectorType, standardId: std.id, interfaceRole: 'CHARGING_OUTPUT' });
+      }, {
+        gun: number, currentA: gun.currentA, connectorType: std.connectorType, standardId: std.id,
+        interfaceRole: 'CHARGING_OUTPUT',
+        controlContract: outputControlContract(std.id + ':' + std.connectorType + ':DC_OUTPUT',
+          Array.isArray(std.dcPins) && std.dcPins.includes('CP'), 'CHARGING_OUTPUT', [std.connector, std.protocol])
+      });
       const lock = std.electronicLock === false ? null : add('EQ-MOB-G' + number + '-LOCK', gun.lockTag || ('YV' + number), 'connector-lock', '输出枪 ' + number + ' 电子锁', 'gun', {}, { gun: number });
+      const branchId = 'MOB-G' + number;
+      const diagnostics = addOutputDiagnosticAssembly(builder, {
+        add, aux24, connectorId: connector, controllerId: secc, branchId,
+        idPrefix: 'EQ-MOB-G' + number, tagSuffix: '-G' + number, displayName: '输出枪 ' + number,
+        controlPrefix: 'G' + number,
+        safeIsolationDeviceIds: [k7, k8],
+        monitoredPoles: [
+          { deviceId: k7, poleId: 'DC_POS', upstreamTerminalId: 'IN', downstreamTerminalId: 'OUT', feedbackTerminalId: 'FEEDBACK' },
+          { deviceId: k8, poleId: 'DC_NEG', upstreamTerminalId: 'IN', downstreamTerminalId: 'OUT', feedbackTerminalId: 'FEEDBACK' }
+        ],
+        powerContext: { powerType: 'DC', domain: 'HV_DC_CHARGE', voltageV: chargeVoltage }
+      });
       chargePositiveMembers.push(endpoint(k7, 'IN'), endpoint(meter, 'SENSE_DC_POS'));
       chargePositiveEdges.push([endpoint(chargeBus, 'BUS_DC_POS'), endpoint(k7, 'IN')], [endpoint(chargeBus, 'BUS_DC_POS'), endpoint(meter, 'SENSE_DC_POS')]);
       chargeNegativeMembers.push(endpoint(rs1, 'IN'), endpoint(meter, 'SENSE_DC_NEG'));
       chargeNegativeEdges.push([endpoint(chargeBus, 'BUS_DC_NEG'), endpoint(rs1, 'IN')], [endpoint(chargeBus, 'BUS_DC_NEG'), endpoint(meter, 'SENSE_DC_NEG')]);
       builder.wire('枪 ' + number + ' K7→FU2', endpoint(k7, 'OUT'), endpoint(fu2, 'IN'), chargePos);
-      builder.wire('枪 ' + number + ' FU2→DC+', endpoint(fu2, 'OUT'), endpoint(connector, 'DC_POS'), chargePos);
+      builder.addNode('枪 ' + number + ' FU2 后 DC+ 输出与安全取样', chargePos,
+        [endpoint(fu2, 'OUT'), endpoint(connector, 'DC_POS'),
+          endpoint(diagnostics.precheckInstanceId, 'SENSE_DC_POS'), endpoint(diagnostics.stateMonitorInstanceId, 'SENSE_DC_POS')],
+        [[endpoint(fu2, 'OUT'), endpoint(connector, 'DC_POS')],
+          [endpoint(fu2, 'OUT'), endpoint(diagnostics.precheckInstanceId, 'SENSE_DC_POS'), { functionalRole: 'PRECHECK_DOWNSTREAM_SENSE' }],
+          [endpoint(fu2, 'OUT'), endpoint(diagnostics.stateMonitorInstanceId, 'SENSE_DC_POS'), { functionalRole: 'WELD_DOWNSTREAM_SENSE' }]]);
       builder.wire('枪 ' + number + ' RS1→K8主负极', endpoint(rs1, 'OUT'), endpoint(k8, 'IN'), chargeNeg);
-      builder.wire('枪 ' + number + ' K8→DC−', endpoint(k8, 'OUT'), endpoint(connector, 'DC_NEG'), chargeNeg);
+      builder.addNode('枪 ' + number + ' K8 后 DC− 输出与安全取样', chargeNeg,
+        [endpoint(k8, 'OUT'), endpoint(connector, 'DC_NEG'),
+          endpoint(diagnostics.precheckInstanceId, 'SENSE_DC_NEG'), endpoint(diagnostics.stateMonitorInstanceId, 'SENSE_DC_NEG')],
+        [[endpoint(k8, 'OUT'), endpoint(connector, 'DC_NEG')],
+          [endpoint(k8, 'OUT'), endpoint(diagnostics.precheckInstanceId, 'SENSE_DC_NEG'), { functionalRole: 'PRECHECK_DOWNSTREAM_SENSE' }],
+          [endpoint(k8, 'OUT'), endpoint(diagnostics.stateMonitorInstanceId, 'SENSE_DC_NEG'), { functionalRole: 'WELD_DOWNSTREAM_SENSE' }]]);
       ['P', 'N'].forEach((side) => builder.wire('枪 ' + number + ' RS1 Kelvin ' + side + '→PJ2分流采样',
         endpoint(rs1, 'KELVIN_' + side), endpoint(meter, 'SHUNT_SENSE_' + side), {
           netClass: 'SIGNAL_CTRL', domain: 'CONTROL', protocol: 'SHUNT_KELVIN', signalRole: 'SHUNT_KELVIN:' + side
@@ -761,10 +999,24 @@ window.EVSE_DESIGN = (function () {
       peTargets.push(endpoint(connector, 'PE'));
       if (lock) addAuxTarget(aux24, lock, 'PWR_V24', 'PWR_V24_0V');
       const connectorInstance = builder.instanceById.get(connector);
+      let pilotAssembly = null;
+      if (connectorInstance.terminals.some((terminal) => terminal.id === 'CP' && terminal.required)) {
+        pilotAssembly = addControlPilotAssembly(builder, {
+          add, aux24, connectorId: connector, controllerId: secc, branchId,
+          idPrefix: 'EQ-MOB-G' + number, tagSuffix: '-G' + number, displayName: '输出枪 ' + number,
+          controlPrefix: 'G' + number
+        });
+        functionalUnits.push(pilotAssembly);
+      }
       connectorInstance.terminals.filter((terminal) => terminal.required && terminal.electricalType === 'signal').forEach((terminal) => {
+        if (terminal.id === 'CP' && pilotAssembly) return;
         connectFixedToDynamic(builder, '输出枪 ' + number + ' ' + terminal.label, endpoint(connector, terminal.id), secc,
           'G' + number + '_' + terminal.id.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase(), 'bidirectional');
       });
+      connectFixedToDynamic(builder, '输出枪 ' + number + ' 正接触器辅助反馈', endpoint(k7, 'FEEDBACK'), secc,
+        'DI_G' + number + '_KPOS_FEEDBACK', 'in');
+      connectFixedToDynamic(builder, '输出枪 ' + number + ' 负接触器辅助反馈', endpoint(k8, 'FEEDBACK'), secc,
+        'DI_G' + number + '_KNEG_FEEDBACK', 'in');
       if (lock) {
         connectFixedToDynamic(builder, '输出枪 ' + number + ' 锁驱动', endpoint(lock, 'DRIVE'), secc, 'DO_G' + number + '_LOCK', 'out');
         connectFixedToDynamic(builder, '输出枪 ' + number + ' 锁反馈', endpoint(lock, 'FEEDBACK'), secc, 'DI_G' + number + '_LOCKED', 'in');
@@ -783,8 +1035,21 @@ window.EVSE_DESIGN = (function () {
         });
         mobileObjects.push(interfaceSupply);
       }
-      gunEquipment.push({ gun: number, positiveContactor: k7, fuse: fu2, currentSensor: rs1, meter, negativeContactor: k8, connector, lock, interfaceSupply });
-      mobileObjects.push(k7, fu2, rs1, meter, k8, connector);
+      const diagnosticsRecord = finishOutputDiagnosticAssembly(builder, diagnostics, [
+        { instanceId: connector, terminalId: 'DC_POS', position: 'CONTACTOR_DOWNSTREAM_CONNECTOR_SIDE' },
+        { instanceId: connector, terminalId: 'DC_NEG', position: 'CONTACTOR_DOWNSTREAM_CONNECTOR_SIDE' }
+      ]);
+      functionalUnits.push(diagnosticsRecord);
+      safetyBranches.push({
+        branchId, connectorId: connector, safeIsolationDeviceIds: [k7, k8],
+        controlPilotRequired: !!pilotAssembly,
+        controlPilotFunctionalUnitId: pilotAssembly && pilotAssembly.id,
+        outputDiagnosticFunctionalUnitId: diagnosticsRecord.id
+      });
+      gunEquipment.push({ gun: number, positiveContactor: k7, fuse: fu2, currentSensor: rs1, meter, negativeContactor: k8,
+        connector, lock, interfaceSupply, pilotAssembly, diagnostics: diagnosticsRecord });
+      mobileObjects.push(k7, fu2, rs1, meter, k8, connector, diagnostics.precheckInstanceId, diagnostics.stateMonitorInstanceId);
+      if (pilotAssembly) mobileObjects.push(...pilotAssembly.instanceIds);
       if (lock) mobileObjects.push(lock);
     });
     builder.addNode('DC/DC 枪侧 DC+ 母线', chargePos, chargePositiveMembers, chargePositiveEdges);
@@ -1154,8 +1419,12 @@ window.EVSE_DESIGN = (function () {
       'dc-dc-charge-module', 'ess-pcs', 'dc-charge-inlet', 'four-pole-safety', 'touch-display',
       'card-reader', 'voice-board', 'loudspeaker', 'indicator-lamp', 'temperature-sensor',
       'selector-switch-dual', 'external-connector-12pin', 'control-relay', 'thermal-unit',
-      'heating-connector-2pin', 'rf-antenna'
+      'heating-connector-2pin', 'rf-antenna',
+      'output-precheck-monitor', 'contactor-state-monitor'
     ];
+    if (functionalUnits.some((unit) => unit.type === 'CONTROL_PILOT_INTERFACE')) {
+      mobileRequiredKinds.push('control-pilot-generator', 'control-pilot-monitor', 'vehicle-diode-detector');
+    }
     if (inletLock) mobileRequiredKinds.push('connector-lock');
     if (nacsModeInterlock) {
       markerIds.push('EQ-MOB-NACS-MODE-ILK', 'EQ-MOB-NACS-IN', 'EQ-MOB-NACS-SEL', 'EQ-MOB-K4N');
@@ -1245,23 +1514,26 @@ window.EVSE_DESIGN = (function () {
       note: 'NACS的PWR_A/PWR_B由单一物理owner进入双极模式选择边界；K4/K4N与KM1许可互斥，默认全断。K4N是防止DC−静态旁路的安全设计要求。', status: 'DESIGN_REQUIREMENT'
     });
     const model = {
-      schema: 'EVSE-EDEM/4.0', schemaVersion: SCHEMA_VERSION,
+      schema: 'EVSE-EDEM/4.1', schemaVersion: SCHEMA_VERSION,
       project: { id: projectId, name: p.pileName || '储能移动充电桩', site: p.site || '', status: 'CONCEPT_DRAFT', referenceDesignation: docControl.projectReference },
       documentControl: docControl, requirements, assumptions,
       decisions: [
         { id: 'DEC-SOURCE-OF-TRUTH', value: 'EDEM_V4_TERMINAL_NETLIST', rationale: '绘图与DXF只消费同一端子级网表。' },
         { id: 'DEC-MOBILE-REFERENCE', value: '0823_PROJECT_TOPOLOGY_SELECTED_STANDARD_PINS', rationale: '真实项目功率/控制拓扑与受控接口引脚分层。' },
-        { id: 'DEC-ROUTING', value: 'CHANNEL_INTERVAL_LANES', rationale: '几何不得推断或改写电气连接。' }
+        { id: 'DEC-ROUTING', value: 'CHANNEL_INTERVAL_LANES', rationale: '几何不得推断或改写电气连接。' },
+        { id: 'DEC-FUNCTIONAL-SAFETY', value: 'EXACT_TERMINALS_AND_FAIL_CLOSED_SEQUENCE', rationale: '控制导引、输出预检与逐极反馈进入同一EDEM网表；候选板级拓扑不得自动选用。' }
       ],
       capabilities: {
         implementedStandards: IMPLEMENTED_STANDARDS.slice(), implementedArchetypes: IMPLEMENTED_ARCHETYPES.slice(),
         terminalLevelNetlist: true, conductorLevelAc: true, explicitDcPolarity: true,
-        isolatedAuxDomains: true, rendererIndependent: true, realProjectReferenceTopology: true
+        isolatedAuxDomains: true, rendererIndependent: true, realProjectReferenceTopology: true,
+        outputPreenergizationDiagnostics: true, perPoleContactorFeedback: true,
+        controlPilotFunctionalUnits: true, functionalSafetyStateMachine: true
       },
       instances: builder.instances, equipment: builder.instances, nets: builder.nets, circuits: builder.circuits,
       topology: {
         archetypeContract: {
-          id: 'ess-mobile', templateVersion: '2.1.0',
+          id: 'ess-mobile', templateVersion: '2.2.0',
           requiredKinds: mobileRequiredKinds,
           markerIds
         },
@@ -1285,6 +1557,8 @@ window.EVSE_DESIGN = (function () {
         },
         acChain: [inletAc, acRcm, km1, pcs], dcChain: batteryBoxes.concat([fu1, k1, essBus]).concat(moduleIds, [chargeBus]),
         gunBranches: gunEquipment, splitCableLinks: [], comboObjects: [], essObjects: mobileObjects,
+        functionalUnits: functionalUnits.map(clone),
+        safetyStateMachine: safetyStateMachine(safetyBranches),
         earthBar: peBar, controlObjects: [bcu, vcu, evcc, secc, ocpp, router, antenna, display, cardReader, voiceBoard,
           speaker, lampYellow, lampGreen, lampRed, temperatureSensor, selectorQt, externalConnector,
           externalChainRelay, fanRelay, fan, jt]
@@ -1337,6 +1611,8 @@ window.EVSE_DESIGN = (function () {
     const peExtraEdges = [];
     const splitLocalAux = [];
     const splitCableLinks = [];
+    const functionalUnits = [];
+    const safetyBranches = [];
 
     const add = (id, tag, kind, name, system, context, extra) => builder.addInstance(Object.assign({
       id, tag, ref: 'EVSE-' + String(system || 'SYS').toUpperCase() + '-' + tag,
@@ -1436,13 +1712,35 @@ window.EVSE_DESIGN = (function () {
       const localController = split ? add('EQ-G' + number + '-LCU', 'LCU' + number, 'charge-controller', '充电终端 ' + number + ' 本地控制器', 'split-terminal') : null;
       const branchController = localController || controller;
       const gunFuse = add('EQ-G' + number + '-F', gun.fuseTag || ('F' + number), 'dc-fuse', '枪 ' + number + ' 直流快熔', 'gun', { polarity: 'POSITIVE' }, { gun: number, ratedCurrentA: gun.fuseA });
-      const kp = add('EQ-G' + number + '-KP', gun.contactorTagP || ('K' + number + 'P'), 'dc-contactor', '枪 ' + number + ' 正极接触器', 'gun', { polarity: 'POSITIVE' }, { gun: number, ratedCurrentA: gun.contactorA });
-      const kn = add('EQ-G' + number + '-KN', gun.contactorTagN || ('K' + number + 'N'), 'dc-contactor', '枪 ' + number + ' 负极接触器', 'gun', { polarity: 'NEGATIVE' }, { gun: number, ratedCurrentA: gun.contactorA });
+      const kp = add('EQ-G' + number + '-KP', gun.contactorTagP || ('K' + number + 'P'), 'dc-contactor', '枪 ' + number + ' 正极接触器', 'gun', {
+        polarity: 'POSITIVE', feedbackRequired: true, feedbackSignalRole: 'G' + number + ':POSITIVE_CONTACTOR_FEEDBACK'
+      }, { gun: number, ratedCurrentA: gun.contactorA, requiredForSafeIsolation: true, poleId: 'DC_POS' });
+      const kn = add('EQ-G' + number + '-KN', gun.contactorTagN || ('K' + number + 'N'), 'dc-contactor', '枪 ' + number + ' 负极接触器', 'gun', {
+        polarity: 'NEGATIVE', feedbackRequired: true, feedbackSignalRole: 'G' + number + ':NEGATIVE_CONTACTOR_FEEDBACK'
+      }, { gun: number, ratedCurrentA: gun.contactorA, requiredForSafeIsolation: true, poleId: 'DC_NEG' });
       const connector = add('EQ-G' + number + '-XS', gun.tag || ('XS' + number), 'charge-connector', '直流充电枪 ' + number, 'gun', {
         connectorType: std.connectorType, protocol: std.protocol, physicalLayer: std.physicalLayer
-      }, { gun: number, currentA: gun.currentA, connectorType: std.connectorType, standardId: std.id });
+      }, {
+        gun: number, currentA: gun.currentA, connectorType: std.connectorType, standardId: std.id,
+        interfaceRole: 'CHARGING_OUTPUT',
+        controlContract: outputControlContract(std.id + ':' + std.connectorType + ':DC_OUTPUT',
+          Array.isArray(std.dcPins) && std.dcPins.includes('CP'), 'CHARGING_OUTPUT', [std.connector, std.protocol])
+      });
       const lock = std.electronicLock === false ? null
         : add('EQ-G' + number + '-YV', gun.lockTag || ('YV' + number), 'connector-lock', '枪 ' + number + ' 电子锁', 'gun', {}, { gun: number });
+      const branchAux24 = split ? { positive: [], return: [] } : aux24;
+      const branchId = 'G' + number;
+      const diagnostics = addOutputDiagnosticAssembly(builder, {
+        add, aux24: branchAux24, connectorId: connector, controllerId: branchController, branchId,
+        idPrefix: 'EQ-G' + number, tagSuffix: String(number), displayName: '枪 ' + number,
+        controlPrefix: 'G' + number,
+        safeIsolationDeviceIds: [kp, kn],
+        monitoredPoles: [
+          { deviceId: kp, poleId: 'DC_POS', upstreamTerminalId: 'IN', downstreamTerminalId: 'OUT', feedbackTerminalId: 'FEEDBACK' },
+          { deviceId: kn, poleId: 'DC_NEG', upstreamTerminalId: 'IN', downstreamTerminalId: 'OUT', feedbackTerminalId: 'FEEDBACK' }
+        ],
+        powerContext: { powerType: 'DC', domain: 'HV_DC_CHARGE', voltageV: dcVoltage }
+      });
 
       const branchPositiveSource = split ? endpoint(cabinetInterface, 'IN_DC_POS') : endpoint(gunFuse, 'IN');
       const branchNegativeSource = split ? endpoint(cabinetInterface, 'IN_DC_NEG') : endpoint(kn, 'IN');
@@ -1473,9 +1771,18 @@ window.EVSE_DESIGN = (function () {
         wireSplitSignal(builder, '终端接口→LCU 联锁', endpoint(terminalInterface, 'OUT_INTERLOCK'), endpoint(localController, 'DI_CABLE_INTERLOCK'), 'HARDWIRED_INTERLOCK', 'SPLIT:INTERLOCK');
       }
       builder.wire('枪 ' + number + ' FU→K+', endpoint(gunFuse, 'OUT'), endpoint(kp, 'IN'), dcPos);
-      builder.wire('枪 ' + number + ' K+→DC+', endpoint(kp, 'OUT'), endpoint(connector, 'DC_POS'), dcPos);
-      builder.wire('枪 ' + number + ' K−→DC−', endpoint(kn, 'OUT'), endpoint(connector, 'DC_NEG'), dcNeg);
-      const branchAux24 = split ? { positive: [], return: [] } : aux24;
+      builder.addNode('枪 ' + number + ' K+ 后 DC+ 输出与安全取样', dcPos,
+        [endpoint(kp, 'OUT'), endpoint(connector, 'DC_POS'),
+          endpoint(diagnostics.precheckInstanceId, 'SENSE_DC_POS'), endpoint(diagnostics.stateMonitorInstanceId, 'SENSE_DC_POS')],
+        [[endpoint(kp, 'OUT'), endpoint(connector, 'DC_POS')],
+          [endpoint(kp, 'OUT'), endpoint(diagnostics.precheckInstanceId, 'SENSE_DC_POS'), { functionalRole: 'PRECHECK_DOWNSTREAM_SENSE' }],
+          [endpoint(kp, 'OUT'), endpoint(diagnostics.stateMonitorInstanceId, 'SENSE_DC_POS'), { functionalRole: 'WELD_DOWNSTREAM_SENSE' }]]);
+      builder.addNode('枪 ' + number + ' K− 后 DC− 输出与安全取样', dcNeg,
+        [endpoint(kn, 'OUT'), endpoint(connector, 'DC_NEG'),
+          endpoint(diagnostics.precheckInstanceId, 'SENSE_DC_NEG'), endpoint(diagnostics.stateMonitorInstanceId, 'SENSE_DC_NEG')],
+        [[endpoint(kn, 'OUT'), endpoint(connector, 'DC_NEG')],
+          [endpoint(kn, 'OUT'), endpoint(diagnostics.precheckInstanceId, 'SENSE_DC_NEG'), { functionalRole: 'PRECHECK_DOWNSTREAM_SENSE' }],
+          [endpoint(kn, 'OUT'), endpoint(diagnostics.stateMonitorInstanceId, 'SENSE_DC_NEG'), { functionalRole: 'WELD_DOWNSTREAM_SENSE' }]]);
       addCoil(builder, branchController, kp, 'G' + number + '_KP', branchAux24);
       addCoil(builder, branchController, kn, 'G' + number + '_KN', branchAux24);
       if (lock) addAuxTarget(branchAux24, lock, 'PWR_V24', 'PWR_V24_0V');
@@ -1506,12 +1813,27 @@ window.EVSE_DESIGN = (function () {
         connectFixedToDynamic(builder, '枪 ' + number + ' 锁反馈', endpoint(lock, 'FEEDBACK'), branchController, 'DI_G' + number + '_LOCKED', 'in');
       }
       const connectorInstance = builder.instanceById.get(connector);
+      let pilotAssembly = null;
+      if (connectorInstance.terminals.some((terminal) => terminal.id === 'CP' && terminal.required)) {
+        const pilotController = split ? branchController : (std.physicalLayer === 'PLC' ? gateway : branchController);
+        pilotAssembly = addControlPilotAssembly(builder, {
+          add, aux24: branchAux24, connectorId: connector, controllerId: pilotController, branchId,
+          idPrefix: 'EQ-G' + number, tagSuffix: String(number), displayName: '枪 ' + number,
+          controlPrefix: 'G' + number
+        });
+        functionalUnits.push(pilotAssembly);
+      }
       connectorInstance.terminals.filter((terminal) => terminal.required && terminal.electricalType === 'signal').forEach((terminal) => {
+        if (terminal.id === 'CP' && pilotAssembly) return;
         const receiver = split ? localController : (std.id === 'chademo' ? gateway : (terminal.id === 'CP' && std.physicalLayer === 'PLC' ? gateway : controller));
         const prefix = receiver === gateway ? 'G' + number + '_EV_' : 'G' + number + '_';
         connectFixedToDynamic(builder, '枪 ' + number + ' ' + terminal.label, endpoint(connector, terminal.id), receiver,
           prefix + terminal.id.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase(), 'bidirectional');
       });
+      connectFixedToDynamic(builder, '枪 ' + number + ' 正接触器辅助反馈', endpoint(kp, 'FEEDBACK'), branchController,
+        'DI_G' + number + '_KPOS_FEEDBACK', 'in');
+      connectFixedToDynamic(builder, '枪 ' + number + ' 负接触器辅助反馈', endpoint(kn, 'FEEDBACK'), branchController,
+        'DI_G' + number + '_KNEG_FEEDBACK', 'in');
       const charger12 = connectorInstance.terminals.find((terminal) => terminal.id === 'CHARGER_12V' && terminal.required);
       if (charger12) {
         const supply = add('EQ-G' + number + '-T12', 'T12-' + number, 'interface-12v-supply', '枪 ' + number + ' CHAdeMO 隔离受控 12V', split ? 'split-terminal' : 'gun', {}, { gun: number, isolatedInterfaceSupply: true });
@@ -1538,8 +1860,19 @@ window.EVSE_DESIGN = (function () {
           netClass: 'POWER_DC_AUX', domain: 'CONNECTOR_AUX_12V', nominalVoltageV: 12, referenceVoltageV: 12, polarity: 'POSITIVE'
         });
       }
+      const diagnosticsRecord = finishOutputDiagnosticAssembly(builder, diagnostics, [
+        { instanceId: connector, terminalId: 'DC_POS', position: 'CONTACTOR_DOWNSTREAM_CONNECTOR_SIDE' },
+        { instanceId: connector, terminalId: 'DC_NEG', position: 'CONTACTOR_DOWNSTREAM_CONNECTOR_SIDE' }
+      ]);
+      functionalUnits.push(diagnosticsRecord);
+      safetyBranches.push({
+        branchId, connectorId: connector, safeIsolationDeviceIds: [kp, kn],
+        controlPilotRequired: !!pilotAssembly,
+        controlPilotFunctionalUnitId: pilotAssembly && pilotAssembly.id,
+        outputDiagnosticFunctionalUnitId: diagnosticsRecord.id
+      });
       gunEquipment.push({ gun: number, fuse: gunFuse, positiveContactor: kp, negativeContactor: kn, connector, lock,
-        cabinetInterface, terminalInterface, localController, cableId });
+        cabinetInterface, terminalInterface, localController, cableId, pilotAssembly, diagnostics: diagnosticsRecord });
     });
 
     /* ---------- ESS atomic protection topology ---------- */
@@ -1567,15 +1900,32 @@ window.EVSE_DESIGN = (function () {
         : null;
       const branchRcd = add('EQ-AC-EV-RCD1', 'RCDAC1', 'residual-current-monitor', '交流充电支路 Type B RCD', 'ac-ev', Object.assign({}, acBranchContext, { protocol: 'DRY_CONTACT' }), { spec: 'Type B / 30mA，额定值待项目复核' });
       const branchMeter = add('EQ-AC-EV-PJ1', 'PJAC1', 'ac-meter', '交流充电支路独立电能表', 'ac-ev', Object.assign({}, acBranchContext, { protocol: 'RS485' }), { spec: std.meter });
-      const branchContactor = add('EQ-AC-EV-KM1', 'KMAC1', 'ac-contactor', '交流充电支路接触器', 'ac-ev', acBranchContext, { ratedCurrentA: 63 });
+      const branchContactor = add('EQ-AC-EV-KM1', 'KMAC1', 'ac-contactor', '交流充电支路接触器', 'ac-ev', Object.assign({}, acBranchContext, {
+        feedbackRequired: true, feedbackSignalRole: 'AC_EV:CONTACTOR_FEEDBACK'
+      }), { ratedCurrentA: 63, requiredForSafeIsolation: true, poleId: 'ALL_AC_CONDUCTORS_MECHANICALLY_LINKED' });
       const branchController = add('EQ-AC-EV-A1', 'AAC1', 'charge-controller', '交流 EVSE 控制器', 'ac-ev');
       const branchConnector = add('EQ-AC-EV-XS1', 'XSAC1', 'ac-charge-connector', std.acConnector + '（逐导体）', 'ac-ev', acBranchContext, {
         standardId: std.id, connectorType: acOutput.connectorType, ratedCurrentA: 63,
-        acOutputProfile: clone(acOutput)
+        acOutputProfile: clone(acOutput), interfaceRole: 'CHARGING_OUTPUT',
+        controlContract: outputControlContract(std.id + ':' + acOutput.connectorType + ':AC_OUTPUT',
+          acOutput.controlPins.includes('CP'), 'CHARGING_OUTPUT', [std.acConnector, 'IEC_61851_CP'])
+      });
+      const acBranchId = 'AC-EV-1';
+      const acDiagnostics = addOutputDiagnosticAssembly(builder, {
+        add, aux24, connectorId: branchConnector, controllerId: branchController, branchId: acBranchId,
+        idPrefix: 'EQ-AC-EV', tagSuffix: '-AC1', displayName: '交流输出 1', controlPrefix: 'AC_EV_1',
+        safeIsolationDeviceIds: [branchContactor],
+        monitoredPoles: outputConductors.map((phase) => ({
+          deviceId: branchContactor, poleId: phase, upstreamTerminalId: 'IN_' + phase,
+          downstreamTerminalId: 'OUT_' + phase, feedbackTerminalId: 'FEEDBACK',
+          mechanicallyLinkedGroup: 'AC_EV_KM1_ALL_POLES'
+        })),
+        powerContext: { powerType: 'AC', conductors: outputConductors, acDomain: outputDomain, voltageV: acOutput.lineVoltage }
       });
       comboObjects.push(branchBreaker);
       if (branchTransformer) comboObjects.push(branchTransformer);
-      comboObjects.push(branchRcd, branchMeter, branchContactor, branchController, branchConnector);
+      comboObjects.push(branchRcd, branchMeter, branchContactor, branchController, branchConnector,
+        acDiagnostics.precheckInstanceId, acDiagnostics.stateMonitorInstanceId);
       addAuxTarget(aux24, branchController, 'PWR_V24', 'PWR_V24_0V');
       addCoil(builder, branchController, branchContactor, 'AC_EV_KM1', aux24);
       peTargets.push(endpoint(branchConnector, 'PE'));
@@ -1595,14 +1945,40 @@ window.EVSE_DESIGN = (function () {
         }
         builder.wire('AC EV RCD→PJ ' + phase, endpoint(branchRcd, 'OUT_' + phase), endpoint(branchMeter, 'IN_' + phase), outputSem);
         builder.wire('AC EV PJ→KM ' + phase, endpoint(branchMeter, 'OUT_' + phase), endpoint(branchContactor, 'IN_' + phase), outputSem);
-        builder.wire('AC EV KM→插座 ' + phase, endpoint(branchContactor, 'OUT_' + phase), endpoint(branchConnector, 'AC_' + phase), outputSem);
+        builder.addNode('AC EV KM 后 ' + phase + ' 输出与安全取样', outputSem,
+          [endpoint(branchContactor, 'OUT_' + phase), endpoint(branchConnector, 'AC_' + phase),
+            endpoint(acDiagnostics.precheckInstanceId, 'SENSE_' + phase), endpoint(acDiagnostics.stateMonitorInstanceId, 'SENSE_' + phase)],
+          [[endpoint(branchContactor, 'OUT_' + phase), endpoint(branchConnector, 'AC_' + phase)],
+            [endpoint(branchContactor, 'OUT_' + phase), endpoint(acDiagnostics.precheckInstanceId, 'SENSE_' + phase), { functionalRole: 'PRECHECK_DOWNSTREAM_SENSE' }],
+            [endpoint(branchContactor, 'OUT_' + phase), endpoint(acDiagnostics.stateMonitorInstanceId, 'SENSE_' + phase), { functionalRole: 'WELD_DOWNSTREAM_SENSE' }]]);
       });
       ['P', 'N'].forEach((side) => {
         connectFixedToDynamic(builder, 'AC EV RCD 状态 ' + side, endpoint(branchRcd, 'SIGNAL_' + side), branchController, 'RCD_STATUS_' + side, 'in');
         connectFixedToDynamic(builder, 'AC EV 电表 RS485 ' + side, endpoint(branchMeter, 'COMM_' + side), branchController, 'METER_' + side, 'bidirectional');
       });
+      let acPilotAssembly = null;
+      if (acOutput.controlPins.includes('CP')) {
+        acPilotAssembly = addControlPilotAssembly(builder, {
+          add, aux24, connectorId: branchConnector, controllerId: branchController, branchId: acBranchId,
+          idPrefix: 'EQ-AC-EV', tagSuffix: '-AC1', displayName: '交流输出 1', controlPrefix: 'AC_EV_1'
+        });
+        functionalUnits.push(acPilotAssembly);
+        comboObjects.push(...acPilotAssembly.instanceIds);
+      }
       acOutput.controlPins.forEach((terminalId) => {
+        if (terminalId === 'CP' && acPilotAssembly) return;
         connectFixedToDynamic(builder, 'AC EV ' + terminalId, endpoint(branchConnector, terminalId), branchController, terminalId, 'bidirectional');
+      });
+      connectFixedToDynamic(builder, 'AC EV 接触器辅助反馈', endpoint(branchContactor, 'FEEDBACK'), branchController,
+        'DI_AC_EV_KM1_FEEDBACK', 'in');
+      const acDiagnosticsRecord = finishOutputDiagnosticAssembly(builder, acDiagnostics,
+        outputConductors.map((phase) => ({ instanceId: branchConnector, terminalId: 'AC_' + phase, position: 'CONTACTOR_DOWNSTREAM_CONNECTOR_SIDE' })));
+      functionalUnits.push(acDiagnosticsRecord);
+      safetyBranches.push({
+        branchId: acBranchId, connectorId: branchConnector, safeIsolationDeviceIds: [branchContactor],
+        controlPilotRequired: !!acPilotAssembly,
+        controlPilotFunctionalUnitId: acPilotAssembly && acPilotAssembly.id,
+        outputDiagnosticFunctionalUnitId: acDiagnosticsRecord.id
       });
       comboAcOutput = clone(acOutput);
     }
@@ -1773,21 +2149,30 @@ window.EVSE_DESIGN = (function () {
 
     const contractByArchetype = {
       'dc-integrated': {
-        requiredKinds: ['ac-incomer', 'power-module-array', 'dc-busbar', 'charge-connector'],
+        requiredKinds: ['ac-incomer', 'power-module-array', 'dc-busbar', 'charge-connector',
+          'output-precheck-monitor', 'contactor-state-monitor'],
         markerIds: ['EQ-AC-IN', 'EQ-PM', 'EQ-DC-BUS']
       },
       'dc-split': {
-        requiredKinds: ['power-module-array', 'dc-busbar', 'split-interface', 'charge-controller', 'charge-connector'],
+        requiredKinds: ['power-module-array', 'dc-busbar', 'split-interface', 'charge-controller', 'charge-connector',
+          'output-precheck-monitor', 'contactor-state-monitor'],
         markerIds: splitCableLinks.flatMap((link) => [link.cabinetInterface, link.terminalInterface, link.localController])
       },
       'ac-dc-combo': {
-        requiredKinds: ['power-module-array', 'charge-connector', 'ac-breaker', 'residual-current-monitor', 'ac-meter', 'ac-contactor', 'ac-charge-connector'],
+        requiredKinds: ['power-module-array', 'charge-connector', 'ac-breaker', 'residual-current-monitor', 'ac-meter', 'ac-contactor', 'ac-charge-connector',
+          'control-pilot-generator', 'control-pilot-monitor', 'vehicle-diode-detector',
+          'output-precheck-monitor', 'contactor-state-monitor'],
         markerIds: ['EQ-AC-EV-QF1', 'EQ-AC-EV-RCD1', 'EQ-AC-EV-PJ1', 'EQ-AC-EV-KM1', 'EQ-AC-EV-A1', 'EQ-AC-EV-XS1']
       }
     };
-    const archetypeContract = Object.assign({ id: p.archetype, templateVersion: '1.0.0' }, contractByArchetype[p.archetype] || {
+    const archetypeContract = Object.assign({ id: p.archetype, templateVersion: '1.1.0' }, contractByArchetype[p.archetype] || {
       requiredKinds: [], markerIds: []
     });
+    if (functionalUnits.some((unit) => unit.type === 'CONTROL_PILOT_INTERFACE')) {
+      ['control-pilot-generator', 'control-pilot-monitor', 'vehicle-diode-detector'].forEach((kind) => {
+        if (!archetypeContract.requiredKinds.includes(kind)) archetypeContract.requiredKinds.push(kind);
+      });
+    }
 
     const requirements = {
       schema: 'EVSE-REQUIREMENT-SPEC/1.0',
@@ -1811,17 +2196,24 @@ window.EVSE_DESIGN = (function () {
       note: '交流充电支路 63A 为未提供专用输入时的方案级假设；电压、地区接口与北美隔离变压器容量须在项目深化时确认。',
       status: 'ASSUMPTION'
     });
+    modelAssumptions.push({
+      id: 'FUNCTIONAL-SAFETY-BOARD-IMPLEMENTATION',
+      value: 'TOPOLOGY_VALUES_THRESHOLDS_AND_TIMING_UNRESOLVED',
+      note: 'CP发生/采样、车辆二极管检查、输出预检与粘连监测已建立端子级功能合同；板级变体、器件值、阈值和时序必须由项目工程师选型计算并复核，平台不得自动猜测。',
+      status: 'ASSUMPTION'
+    });
     const model = {
-      schema: 'EVSE-EDEM/4.0',
+      schema: 'EVSE-EDEM/4.1',
       schemaVersion: SCHEMA_VERSION,
       project: { id: projectId, name: p.pileName || '充电桩', site: p.site || '', status: 'CONCEPT_DRAFT', referenceDesignation: docControl.projectReference },
       documentControl: docControl,
       requirements,
       assumptions: modelAssumptions,
       decisions: [
-        { id: 'DEC-SOURCE-OF-TRUTH', value: 'EDEM_V4_TERMINAL_NETLIST', rationale: '绘图与 DXF 必须引用同一 instances/nets/circuits。' },
+        { id: 'DEC-SOURCE-OF-TRUTH', value: 'EDEM_V4_1_TERMINAL_NETLIST', rationale: '绘图与 DXF 必须引用同一 instances/nets/circuits。' },
         { id: 'DEC-ROUTING', value: 'CHANNEL_INTERVAL_LANES', rationale: '几何路由不得推断或改写电气连接。' },
-        { id: 'DEC-COMPONENT-AI', value: 'DRAFT_REVIEW_APPROVE', rationale: 'AI 导入器件只能生成隔离草稿，批准后才能进入受控目录。' }
+        { id: 'DEC-COMPONENT-AI', value: 'DRAFT_REVIEW_APPROVE', rationale: 'AI 导入器件只能生成隔离草稿，批准后才能进入受控目录。' },
+        { id: 'DEC-FUNCTIONAL-SAFETY', value: 'EXACT_TERMINALS_AND_FAIL_CLOSED_SEQUENCE', rationale: '控制导引、输出预检与逐极反馈进入同一EDEM网表；候选板级拓扑不得自动选用。' }
       ],
       capabilities: {
         implementedStandards: IMPLEMENTED_STANDARDS.slice(),
@@ -1830,7 +2222,11 @@ window.EVSE_DESIGN = (function () {
         conductorLevelAc: true,
         explicitDcPolarity: true,
         isolatedAuxDomains: true,
-        rendererIndependent: true
+        rendererIndependent: true,
+        outputPreenergizationDiagnostics: true,
+        perPoleContactorFeedback: true,
+        controlPilotFunctionalUnits: true,
+        functionalSafetyStateMachine: true
       },
       instances: builder.instances,
       equipment: builder.instances,
@@ -1845,6 +2241,8 @@ window.EVSE_DESIGN = (function () {
         comboObjects,
         comboAcOutput,
         essObjects,
+        functionalUnits: functionalUnits.map(clone),
+        safetyStateMachine: safetyStateMachine(safetyBranches),
         earthBar: peBar,
         controlObjects: [controller, gateway, router, hmi, estop, door, lamp, environment, thermal]
       },

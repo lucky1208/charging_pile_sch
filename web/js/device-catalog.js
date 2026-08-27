@@ -9,7 +9,7 @@
 window.EVSE_DEVICE_CATALOG = (function () {
   'use strict';
 
-  const VERSION = '2.4.0';
+  const VERSION = '2.5.0';
   const STATUS = Object.freeze({ APPROVED: 'APPROVED', DEPRECATED: 'DEPRECATED' });
 
   function terminal(id, options) {
@@ -158,6 +158,11 @@ window.EVSE_DEVICE_CATALOG = (function () {
     , 'rf-antenna': { name: '射频天线', category: 'COMMUNICATION' }
     , 'nacs-shared-inlet': { name: 'NACS交直流共享物理输入口', category: 'CONNECTOR' }
     , 'ac-dc-power-selector': { name: '交直流双极模式选择边界', category: 'SWITCHING' }
+    , 'control-pilot-generator': { name: '控制导引 CP 信号发生单元', category: 'CONTROL_DIAGNOSTIC' }
+    , 'control-pilot-monitor': { name: '控制导引 CP 高阻采样单元', category: 'CONTROL_DIAGNOSTIC' }
+    , 'vehicle-diode-detector': { name: '车辆侧二极管存在检测单元', category: 'CONTROL_DIAGNOSTIC' }
+    , 'output-precheck-monitor': { name: '送电前输出回路预检单元', category: 'SAFETY_DIAGNOSTIC' }
+    , 'contactor-state-monitor': { name: '接触器逐极状态/粘连监测单元', category: 'SAFETY_DIAGNOSTIC' }
   });
 
   function connectorPinTerminals(context, powerDirection) {
@@ -266,6 +271,77 @@ window.EVSE_DEVICE_CATALOG = (function () {
       case 'ess-contactor':
       case 'precharge-contactor': out = [terminal('IN', { netClass: c.netClass || 'POWER_DC', domain: c.domain || 'HV_DC_CHARGE', polarity: c.polarity || 'POSITIVE', direction: 'in', required: true }), terminal('OUT', { netClass: c.netClass || 'POWER_DC', domain: c.domain || 'HV_DC_CHARGE', polarity: c.polarity || 'POSITIVE', direction: 'out', required: true })].concat(auxPair(24, 'COIL', 'in', true)); break;
       case 'insulation-monitor': out = dcPair('SENSE', 'in', 'HV_DC_CHARGE', true).concat([terminal('PE', { netClass: 'PROTECTIVE_EARTH', domain: 'PROTECTIVE_EARTH', direction: 'out', required: true })]).concat(auxPair(24, 'PWR', 'in', true)).concat(signalPair('ALARM', 'SIGNAL_CTRL', 'DRY_CONTACT', 'out', true)); break;
+      case 'control-pilot-generator': out = auxPair(24, 'PWR', 'in', true).concat([
+        terminal('PWM_CMD', {
+          netClass: 'SIGNAL_CTRL', domain: 'CONTROL', protocol: 'CONTROL_PILOT_INTERNAL',
+          signalRole: 'CP:PWM_COMMAND', direction: 'in', required: true,
+          multiplicity: 'one', electricalType: 'pwm-command'
+        }),
+        terminal('CP_OUT', {
+          label: 'CP OUT', netClass: c.cpNetClass || 'SIGNAL_CTRL', domain: c.cpDomain || 'CONTROL',
+          protocol: c.cpProtocol || 'IEC_61851_CP', signalRole: c.cpSignalRole || 'CP',
+          direction: 'out', required: true, multiplicity: 'one', electricalType: 'controlled-pilot-source'
+        })
+      ]); break;
+      case 'control-pilot-monitor': out = auxPair(24, 'PWR', 'in', true).concat([
+        terminal('CP_SENSE', {
+          label: 'CP SENSE', netClass: c.cpNetClass || 'SIGNAL_CTRL', domain: c.cpDomain || 'CONTROL',
+          protocol: c.cpProtocol || 'IEC_61851_CP', signalRole: c.cpSignalRole || 'CP',
+          direction: 'in', required: true, multiplicity: 'one', electricalType: 'high-impedance-pilot-sense'
+        }),
+        terminal('CP_VALUE', {
+          netClass: 'SIGNAL_CTRL', domain: 'CONTROL', protocol: 'CONTROL_PILOT_INTERNAL',
+          signalRole: 'CP:MEASURED_VALUE', direction: 'out', required: true,
+          multiplicity: 'one', electricalType: 'conditioned-analog-signal'
+        })
+      ]); break;
+      case 'vehicle-diode-detector': out = auxPair(24, 'PWR', 'in', true).concat([
+        terminal('CP_SENSE', {
+          label: 'CP DIODE SENSE', netClass: c.cpNetClass || 'SIGNAL_CTRL', domain: c.cpDomain || 'CONTROL',
+          protocol: c.cpProtocol || 'IEC_61851_CP', signalRole: c.cpSignalRole || 'CP',
+          direction: 'in', required: true, multiplicity: 'one', electricalType: 'high-impedance-diode-sense'
+        }),
+        terminal('DIODE_OK', {
+          netClass: 'SIGNAL_CTRL', domain: 'CONTROL', protocol: 'CONTROL_PILOT_INTERNAL',
+          signalRole: 'CP:VEHICLE_DIODE_OK', direction: 'out', required: true,
+          multiplicity: 'one', electricalType: 'diagnostic-result'
+        })
+      ]); break;
+      case 'output-precheck-monitor':
+      case 'contactor-state-monitor': {
+        const monitorFunction = kind === 'output-precheck-monitor' ? 'OUTPUT_PRECHECK' : 'CONTACTOR_STATE';
+        const senses = c.powerType === 'AC'
+          ? acConductors(c).map((phase) => terminal('SENSE_' + phase, {
+            label: 'SENSE ' + phase, netClass: 'POWER_AC', domain: c.acDomain || 'AC_EV_OUTPUT', phase,
+            direction: 'in', required: true, multiplicity: 'one',
+            electricalType: 'high-impedance-voltage-sense', voltageRangeV: [0, Math.max(600, Number(c.voltageV) || 600)]
+          }))
+          : dcPair('SENSE', 'in', c.domain || 'HV_DC_CHARGE', true).map((sense) => Object.assign(sense, {
+            multiplicity: 'one', electricalType: 'high-impedance-voltage-sense'
+          }));
+        out = senses.concat(auxPair(24, 'PWR', 'in', true));
+        if (kind === 'output-precheck-monitor') {
+          out = out.concat([
+            terminal('TEST_ENABLE', {
+              netClass: 'SIGNAL_CTRL', domain: 'CONTROL', protocol: 'HARDWIRED_DIAGNOSTIC',
+              signalRole: monitorFunction + ':ENABLE', direction: 'in', required: true,
+              multiplicity: 'one', electricalType: 'diagnostic-command'
+            }),
+            terminal('TEST_RESULT', {
+              netClass: 'SIGNAL_CTRL', domain: 'CONTROL', protocol: 'HARDWIRED_DIAGNOSTIC',
+              signalRole: monitorFunction + ':RESULT', direction: 'out', required: true,
+              multiplicity: 'one', electricalType: 'diagnostic-result'
+            })
+          ]);
+        } else {
+          out = out.concat([terminal('WELD_STATUS', {
+            netClass: 'SIGNAL_CTRL', domain: 'CONTROL', protocol: 'HARDWIRED_DIAGNOSTIC',
+            signalRole: monitorFunction + ':WELD_STATUS', direction: 'out', required: true,
+            multiplicity: 'one', electricalType: 'diagnostic-result'
+          })]);
+        }
+        break;
+      }
       case 'charge-connector': out = connectorTerminals(c); break;
       case 'dc-charge-inlet': out = connectorPinTerminals(c, 'out'); break;
       case 'ac-charge-connector': {
@@ -560,6 +636,14 @@ window.EVSE_DEVICE_CATALOG = (function () {
       default: out = [];
     }
     if (['ac-contactor'].includes(kind)) out = out.concat(auxPair(24, 'COIL', 'in', true));
+    if (['ac-contactor', 'dc-contactor'].includes(kind) && c.feedbackRequired === true) {
+      out = out.concat([terminal('FEEDBACK', {
+        netClass: 'SIGNAL_CTRL', domain: 'CONTROL', protocol: 'DRY_CONTACT',
+        signalRole: c.feedbackSignalRole || 'CONTACTOR:FEEDBACK', direction: 'out', required: true,
+        multiplicity: 'one', electricalType: 'mechanically-linked-auxiliary-feedback',
+        evidenceStatus: c.feedbackEvidenceStatus || 'FUNCTIONAL_REQUIREMENT—DEVICE_EVIDENCE_REQUIRED'
+      })]);
+    }
     if (kind === 'ac-meter' || (kind === 'dc-meter' && c.measurementMode !== 'SHUNT_TA_TB')) out = out.concat(signalPair('COMM', 'SIGNAL_COMM', c.protocol || 'RS485', 'bidirectional', true));
     if (kind === 'residual-current-monitor') out = out.concat(signalPair('SIGNAL', 'SIGNAL_CTRL', c.protocol || 'ANALOG_OR_DRY', 'out', true));
     if (kind === 'current-transducer') {

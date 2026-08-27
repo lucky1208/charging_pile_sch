@@ -15,8 +15,8 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.1.0';
-  const GRID_SCHEMA = 'EVSE-SCHEMATIC-PLACEMENT/1.1';
+  const VERSION = '1.2.0';
+  const GRID_SCHEMA = 'EVSE-SCHEMATIC-PLACEMENT/1.2';
 
   class SchematicCompileError extends Error {
     constructor(code, message, details) {
@@ -43,6 +43,9 @@
     'aux-busbar': 230, 'charge-controller': 240, 'comm-gateway': 250,
     'hmi-unit': 260, 'safety-device': 270, 'indicator-lamp': 275,
     'environment-sensor': 280, 'thermal-unit': 290,
+    'control-pilot-generator': 282, 'control-pilot-monitor': 283,
+    'vehicle-diode-detector': 284, 'output-precheck-monitor': 285,
+    'contactor-state-monitor': 286,
     'battery-cluster': 300, 'ess-fuse': 310, 'ess-contactor': 320,
     'precharge-contactor': 330, 'precharge-resistor': 340,
     'ess-busbar': 350, 'bms-controller': 360, 'ess-dcdc': 370, 'ess-pcs': 380
@@ -62,6 +65,9 @@
     Object.freeze({ id: 'AUXILIARY', order: 30,
       title: '辅助电源与热管理  高压/AC → 24V → 12V → 风机/加热/执行器',
       flow: 'AUXILIARY_POWER' }),
+    Object.freeze({ id: 'SAFETY_DIAGNOSTICS', order: 35,
+      title: '送电许可与诊断  CP发生/采样/二极管检查 → 输出预检 → 逐极反馈/粘连监测',
+      flow: 'PRE_ENERGIZATION_AND_CONTACTOR_DIAGNOSTICS' }),
     Object.freeze({ id: 'CONTROL_COMM', order: 40,
       title: '控制、安全与通信  BMS/CCU → 网关/HMI/OCPP → 现场执行与采样',
       flow: 'CONTROL_AND_COMMUNICATION' }),
@@ -96,7 +102,12 @@
     'card-reader': 22, 'voice-board': 24, 'environment-sensor': 25,
     'temperature-sensor': 26, 'ac-dc-mode-interlock': 27, 'selector-switch-dual': 28,
     'control-relay': 29, 'external-connector-12pin': 30, 'rf-antenna': 32,
-    'indicator-lamp': 32, 'earth-bar': 0
+    'indicator-lamp': 32,
+    /* output permission / diagnostics */
+    'control-pilot-generator': 0, 'control-pilot-monitor': 10,
+    'vehicle-diode-detector': 20, 'output-precheck-monitor': 30,
+    'contactor-state-monitor': 40,
+    'earth-bar': 0
   });
 
   const LAYER_BY_NET_CLASS = Object.freeze({
@@ -170,6 +181,9 @@
     const system = text(instance && instance.system).toLowerCase();
     const classes = terminalNetClasses(instance);
     if (kind === 'earth-bar' || system === 'earth' || system === 'pe') return 'PROTECTIVE_EARTH';
+    if (kind === 'control-pilot-generator' || kind === 'control-pilot-monitor' ||
+        kind === 'vehicle-diode-detector' || kind === 'output-precheck-monitor' ||
+        kind === 'contactor-state-monitor') return 'SAFETY_DIAGNOSTICS';
     if (kind === 'battery-heater' || kind === 'loudspeaker') return 'AUXILIARY';
     if (kind === 'touch-display' || kind === 'card-reader' || kind === 'voice-board' || kind === 'rf-antenna' ||
         kind === 'selector-switch-dual' || kind === 'external-connector-12pin' ||

@@ -33,7 +33,7 @@ function representativePorts(x, y, width, height) {
 test('all controlled device classes have explicit non-fallback IEC symbol mappings', () => {
   const controlledKinds = catalogDeviceKinds();
   assert.deepEqual(CATALOG.CURRENT_DEVICE_KINDS, controlledKinds);
-  assert.equal(controlledKinds.length, 61);
+  assert.equal(controlledKinds.length, 66);
   controlledKinds.forEach((kind) => {
     const resolved = CATALOG.resolve(kind);
     assert.equal(resolved.fallback, false, kind);
