@@ -46,10 +46,18 @@ test('Web 的 DXF 与 JSON 导出直接携带 Drawing IR，不回退解析 SVG',
   assert.doesNotMatch(app, /exportSvgLegacy\(exportSvgMarkup/);
 });
 
-test('Web 明示功能安全模型与 Qwen 候选知识的工程边界', () => {
+test('Web 明示功能安全模型与用户项目证据化候选知识的工程边界', () => {
   assert.match(html, /id="functional-unit-status"/);
   assert.match(app, /renderFunctionalUnitStatus\(\)/);
   assert.match(app, /functionalUnitKnowledge/);
   assert.match(app, /禁止自动选型/);
   assert.match(app, /板级电路、器件值、阈值和时序仍为项目待决项/);
+});
+
+test('Web 提供真实项目参考矩阵并明确区分可见走线和待复核推断', () => {
+  assert.match(app, /EVSE_REFERENCE_SYSTEM_LIBRARY/);
+  assert.match(app, /showReferenceSystem/);
+  assert.match(app, /端子标注\+走线明确/);
+  assert.match(app, /功能推断—必须复核/);
+  assert.match(html, /推断待核三级保存/);
 });

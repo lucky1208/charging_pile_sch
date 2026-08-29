@@ -234,10 +234,10 @@ test('the five new functional-safety symbols are explicit native IEC mappings, n
   });
 });
 
-test('Qwen-derived functional-unit taxonomy is exactly 32 review-only candidates and cannot auto-select', () => {
+test('primary-evidence-indexed functional-unit taxonomy is exactly 32 review-only candidates and cannot auto-select', () => {
   const library = win.EVSE_FUNCTIONAL_UNIT_LIBRARY;
   assert.ok(library);
-  assert.equal(library.SOURCE_STATUS, 'SECONDARY_EXTRACTION—PRIMARY_EVIDENCE_MISSING');
+  assert.equal(library.SOURCE_STATUS, 'PRIMARY_USER_EVIDENCE_INDEXED—ENGINEER_APPROVAL_REQUIRED');
   assert.equal(Object.keys(library.GROUPS).length, 7);
   assert.deepEqual(Object.keys(library.GROUPS).sort(),
     ['adh_det', 'cp_det', 'cp_gen', 'diode_det', 'gnd_det', 'psu', 'sc_det']);

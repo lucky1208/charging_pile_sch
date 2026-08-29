@@ -1,4 +1,4 @@
-# EVSE Schematic Design 2.2
+# EVSE Schematic Design 2.3
 
 这是一个方案级充电桩电气设计编译器。输入经过需求确认后，被编译为 EDEM v4.1 端子级网表；SVG 和 DXF 都从同一 Drawing IR 生成，并由 ERC、几何与图模覆盖闸门 fail-closed。
 
@@ -10,11 +10,13 @@
 - **P1 — 电气真值**：EDEM v4.1 明确建模 L1/L2/L3/N、DC+/DC−、PE、24V/0V、12V/0V、枪针脚、接触器线圈和储能原子保护器件；新增受控设备类目录与端子级 ERC。
 - **P2 — 几何与导出**：确定性 placement、通道与区间图 lane 分配、正交路由、全局交叉后处理、keepout、Drawing IR 和 exact coverage；SVG/DXF 同源且保留可追溯 ID。
 - **P3 — 器件导入**：安全的资料草稿、证据、审核、批准、废弃和受控 JSON 导出工作台；上传内容永不作为代码执行。
-- **IEC 符号与产品变体**：66 类原生 Drawing IR 矢量符号取代统一方框；五种接口和四种桩型分别编译受控端子与拓扑。真实储充项目图的结构化提取结果进入模型与回归测试，原始客户图和包含其逐线细节的本地证据文件不随公共仓库发布。
+- **IEC 符号与产品变体**：66 类原生 Drawing IR 矢量符号取代统一方框；五种接口和四种桩型分别编译受控端子与拓扑。只有受控且已批准的项目结论可以进入生成模型；本轮两份真实项目图的部分追线结果只进入只读证据库、诊断与回归，不参与自动拓扑选择。原始客户图和包含其逐线细节的本地证据文件不随公共仓库发布。
 - **控制导引与输出安全诊断**：每个适用物理接口建立 CP 发生、高阻采样和车辆二极管检查；每个输出建立接触器下游逐导体预检、接触器反馈/粘连监测与 fail-closed 状态机。板级器件值、阈值和时序保持项目待决。
 - **Qwen 参考迁移**：保留 7 类/32 个候选拓扑作为只读知识，不自动选型；拒绝第二套手绘网表、主观评分和字符串自证闸门。证据与取舍见 [Qwen 参考代码审计与迁移](docs/QWEN-REFERENCE-MIGRATION.md)。
+- **用户项目证据与真实系统参考**：完整索引 79 页 `对比.docx`，重建 29 类板级矢量符号、7 个详细 PIN→PIN 功能模板（108 条板级逻辑端点连线），并把欧标储能图与国标 60kW 图整理为 2 份只读、部分追线的系统参考（70 个器件、185 条端点关系、9 个功能单元）。其中 56 条来自可读端子标注，120 条来自可见走线但仍含聚合端口，9 条是明确标记的功能推断；当前仍有 100 个未决项，结构校验通过不等于逐 PIN 提取完整。封装物理脚号缺失的多 PIN 器件会报告 `PACKAGE_PIN_MAP_REQUIRED`，任何参考实例都禁止自动成为产品拓扑。
+- **在线对象化编辑第一阶段**：可选择和检查已有器件、PIN、网络、导线、图示与文字；可拖动已有器件、已有导线的中间正交线段和注释，修改文字，并支持撤销/重做/恢复自动布局。每次提交重建 Drawing IR 并重新执行端点覆盖与几何闸门；非法编辑事务回滚。当前不支持交互式新建/删除网络、障碍传播式“挤推布线”或多页层次化工程图编辑。
 
-详细架构见 [P0–P3 架构与安全边界](docs/P0-P3-ARCHITECTURE.md)，完整交付结果见 [P0–P3 最终验收报告](docs/P0-P3-VERIFICATION.md)，功能安全专项见 [控制导引与输出诊断验收](docs/FUNCTIONAL-SAFETY-VERIFICATION.md)，P2 几何专项见 [216 矩阵验收报告](docs/P2-DRAWING-IR-VERIFICATION.md)。
+详细架构见 [P0–P3 架构与安全边界](docs/P0-P3-ARCHITECTURE.md)；2.2 的历史验收基线见 [P0–P3 验收报告](docs/P0-P3-VERIFICATION.md)、[控制导引与输出诊断验收](docs/FUNCTIONAL-SAFETY-VERIFICATION.md) 和 [216 矩阵验收报告](docs/P2-DRAWING-IR-VERIFICATION.md)；2.3 本轮边界见 [用户项目图纸证据与在线编辑阶段报告](docs/USER-PROJECT-EVIDENCE-EDITOR.md)，最终增量回归见 [2.3 验收报告](docs/EVSE-2.3-VERIFICATION.md)。
 
 ## 快速生成
 
@@ -45,7 +47,7 @@ node scripts\generate.js --params .\params.json --out .\output --name demo
 
 - `demo.svg`：按内容自动选择 A3/A2/A1/A0（必要时自定义幅面）的方案级端子原理图；
 - `demo.dxf`：直接由 Drawing IR 生成的 R2010 DXF；
-- `demo.json`：需求、选型、EDEM、ERC、图模审计和导出闸门的完整方案包。
+- `demo.json`：当前生成会话的数据包，包含需求、选型、EDEM、已实现的 ERC、图模审计和导出闸门结果。
 
 字段契约见 [parameters.md](references/parameters.md)。接口支持 `GB/T、CCS2、CCS1、NACS、CHAdeMO`；桩型支持 `直流一体、直流分体、交直流一体、储能移动`。每个组合仍是方案级编译结果，不代表已经取得对应标准认证。
 

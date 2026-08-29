@@ -1,6 +1,7 @@
 node_modules/
 .DS_Store
 *.log
+*.docx
 .vercel
 tests/out-*.svg
 .verification-output/
@@ -9,7 +10,8 @@ tmp/
 iec_symbols_svg/
 docs/REAL-SCHEMATIC-BASELINE-0823.md
 sch_lib/*
-!sch_lib/国标60kW充电桩原理图.svg
-!sch_lib/欧标充电桩电气原理图.svg
+.private-evidence/
+evidence-private/
+docs/private/
 component-workbench/.store/
 component-workbench/.exports/

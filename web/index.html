@@ -63,6 +63,48 @@
   .review-title{font-size:12px;font-weight:700;color:#58a6ff;margin-bottom:8px}
   .requirement-confirm{display:flex;align-items:flex-start;gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line);font-size:11px;line-height:1.55;color:var(--text)}
   .requirement-confirm input{margin-top:2px;accent-color:var(--cyan)}
+  .editor-shell{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;align-items:start}
+  .editor-shell.active{grid-template-columns:220px minmax(0,1fr) 280px}
+  .editor-side{display:none;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;
+    max-height:80vh;overflow:auto;position:sticky;top:8px}
+  .editor-shell.active .editor-side{display:block}
+  .editor-side h3{font-size:12px;color:#7fb8e8;margin-bottom:7px}
+  .editor-side details{border-top:1px solid var(--line);padding:7px 0}
+  .editor-side summary{font-size:11px;cursor:pointer;color:#b7d5f4}
+  .editor-side .muted{font-size:10px;color:var(--text2);line-height:1.5}
+  .editor-object{padding:6px;border:1px solid transparent;border-radius:6px;font-size:10px;line-height:1.45;cursor:pointer}
+  .editor-object:hover{border-color:#34527c;background:var(--panel2)}
+  .editor-symbol-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px}
+  .editor-symbol-card{background:#fff;color:#172033;border-radius:5px;padding:3px;text-align:center;font-size:9px;overflow:hidden}
+  .editor-symbol-card svg{display:block;width:100%;height:54px}
+  .inspector-row{display:grid;grid-template-columns:72px 1fr;gap:6px;padding:4px 0;border-bottom:1px solid rgba(52,82,124,.35);
+    font-size:10px;line-height:1.45;word-break:break-all}
+  .inspector-row span:first-child{color:var(--text2)}
+  .inspector-pins{max-height:240px;overflow:auto;margin-top:6px}
+  .editor-status{display:none;margin-top:8px;padding:7px 10px;border-radius:7px;background:#0d1a2d;border:1px solid #29466f;
+    color:#b7d5f4;font-size:10px;line-height:1.5}
+  .editor-shell.active + .editor-status{display:block}
+  .diagram-box.editor-active svg{background-color:#fff;background-image:linear-gradient(rgba(48,75,108,.10) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(48,75,108,.10) 1px,transparent 1px);background-size:10px 10px;touch-action:none;user-select:none}
+  .diagram-box.editor-active g[id^="DEVICE-"]{cursor:move}
+  .diagram-box.editor-active g[id^="ROUTE-"]{cursor:crosshair}
+  .diagram-box.editor-active #EVSE-IR-ANNOTATIONS [data-primitive]{cursor:move}
+  .diagram-box.editor-active [data-editor-selected="true"]{filter:drop-shadow(0 0 3px #00b7ff)}
+  .diagram-box.editor-active g[id^="ROUTE-"][data-editor-selected="true"] line,
+  .diagram-box.editor-active g[id^="ROUTE-"][data-editor-selected="true"] path{stroke:#008cff!important;stroke-width:3!important}
+  .diagram-box.editor-active [data-editor-dragging="true"]{opacity:.72;filter:drop-shadow(0 0 5px #00f0ff)}
+  .mini-btn:disabled{opacity:.42;cursor:not-allowed}
+  .quality-dimensions{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:7px}
+  .quality-dimension{border:1px solid #34527c;border-radius:6px;padding:5px;font-size:9px;color:var(--text2)}
+  body.workspace-mode .wrap{grid-template-columns:1fr;max-width:none;padding:8px 12px}
+  body.workspace-mode #design-config-panel{display:none}
+  body.workspace-mode .editor-shell.active{grid-template-columns:240px minmax(0,1fr) 300px}
+  body.workspace-mode .editor-library{display:block!important}
+  body.workspace-mode .diagram-box{max-height:calc(100vh - 170px)}
+  body.workspace-mode header{padding:8px 16px}
+  body.workspace-mode footer{display:none}
+  @media (max-width:1450px){.editor-shell.active{grid-template-columns:minmax(0,1fr) 260px}.editor-library{display:none!important}}
+  @media (max-width:1050px){.editor-shell.active{grid-template-columns:1fr}.editor-side{position:static;max-height:360px}.editor-library{display:block!important}}
   footer{margin:24px;padding:12px;border-top:1px solid var(--line);font-size:11px;color:var(--text2);text-align:center;line-height:1.8}
   @media (max-width:1100px){.wrap{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(3,1fr)}}
 </style>
@@ -76,9 +118,9 @@
 
 <div class="wrap">
   <!-- ============ 左: 充电桩设计参数 ============ -->
-  <div class="card">
+  <div class="card" id="design-config-panel">
     <h2>⚡ 充电桩设计</h2>
-    <div class="desc">填写充电标准、功率、枪数与储能配置后，平台按确定性算法选取功率模块、开关、接触器、快熔、传感器、电池簇与变换器档位，并自动生成 A3 充电桩电气原理图。AI 仅用于自然语言需求翻译，不参与任何计算与出图。</div>
+    <div class="desc">填写充电标准、功率、枪数与储能配置后，平台按确定性算法选取功率模块、开关、接触器、快熔、传感器、电池簇与变换器档位，并按内容自动选幅生成方案级充电桩电气原理图。AI 仅用于自然语言需求翻译，不参与任何计算与出图。</div>
 
     <div class="section-title">基本信息</div>
     <div class="form-group"><label class="form-label">桩名称 / 项目</label>
@@ -281,13 +323,14 @@
     <div id="empty-hint" style="padding:80px 20px;text-align:center;color:var(--text2)">
       <div style="font-size:44px;margin-bottom:12px">🔌</div>
       <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">请先在左侧填写充电桩参数</div>
-      <div style="font-size:12px">点击「生成充电桩原理图」后，此处展示自动选型结果与 A3 电气原理图</div>
+      <div style="font-size:12px">点击「生成充电桩原理图」后，此处展示自动选型结果与自动选幅的方案级电气原理图</div>
     </div>
     <div id="result-area" style="display:none">
       <div class="kpi-grid" id="summary-cards"></div>
       <div id="warn-box"></div>
       <div id="design-status"></div>
       <div id="functional-unit-status"></div>
+      <div id="quality-status"></div>
       <div class="diagram-actions">
         <button class="mini-btn" onclick="downloadSvg()">⬇ 下载 SVG</button>
         <button class="mini-btn" onclick="downloadDxf()">⬇ 下载 DXF 草图</button>
@@ -299,9 +342,27 @@
         <button class="mini-btn" onclick="zoomIn()">➕</button>
         <button class="mini-btn" onclick="zoomFitWidth()">↔ 适宽</button>
         <button class="mini-btn" onclick="zoomFitSheet()">▣ 适页</button>
-        <span style="font-size:11px;color:var(--text2)">A3 方案级图框 · DXF 为可编辑概念草图 · 生产图须由专业人员校核并签发</span>
+        <span style="width:1px;height:16px;background:var(--line)"></span>
+        <button class="mini-btn" id="editor-toggle" onclick="toggleEditor()">✎ 在线编辑</button>
+        <button class="mini-btn" id="editor-workspace" onclick="toggleEditorWorkspace()">⛶ 全屏工作台</button>
+        <button class="mini-btn" id="editor-undo" onclick="editorUndo()" disabled>↶ 撤销</button>
+        <button class="mini-btn" id="editor-redo" onclick="editorRedo()" disabled>↷ 重做</button>
+        <button class="mini-btn" id="editor-reset" onclick="editorReset()" disabled>恢复自动布局</button>
+        <span style="font-size:11px;color:var(--text2)">自动选幅的方案级图框 · DXF 为可编辑概念草图 · 生产图须由专业人员校核并签发</span>
       </div>
-      <div class="diagram-box" id="d-pile"></div>
+      <div class="editor-shell" id="editor-shell">
+        <aside class="editor-side editor-library" id="editor-library">
+          <h3>元器件与功能单元库</h3>
+          <div class="muted">IEC/GB 项目化重建符号（未宣称认证库）；板级模板使用逻辑/功能端口 PIN→PIN，未确认的物理封装脚号保持未决；真实项目图是只读 partial trace，按端子标注、可见走线、推断待核三级保存，不是完整网表。</div>
+          <div id="editor-library-content"></div>
+        </aside>
+        <div class="diagram-box" id="d-pile"></div>
+        <aside class="editor-side" id="editor-inspector">
+          <h3>属性 / PIN / 网络</h3>
+          <div id="editor-inspector-content" class="muted">点击器件、导线或图示对象查看属性。可拖动已有器件和已有导线的中间线段；当前不支持新建/删除网络、完整 push-shove 或多页层次化编辑。</div>
+        </aside>
+      </div>
+      <div class="editor-status" id="editor-status">对象化编辑：器件移动和中间线段移动会在提交时重新执行几何检查，以及针对当前生成图已建模端点的 ERC；不合法操作自动回滚。</div>
       <div id="review-host"></div>
     </div>
   </div>
@@ -312,7 +373,7 @@
   本平台输出为方案级自动原理图，不构成标准符合性证明、保护整定书、型式试验结论或设备报价；生产/施工图须由具备相应资格的专业人员校核、深化与签发
 </footer>
 
-<script src="js/engine-bundle.js?v=sha256-3beb3abf039042078a15fbf062d33ebcd2cc979fda2813c59c94588cd5ba677d" data-generated-bundle-hash="sha256-3beb3abf039042078a15fbf062d33ebcd2cc979fda2813c59c94588cd5ba677d"></script>
-<script src="js/app.js?v=sha256-7950cb32d67ba08eec2f105d567463a1f7abd9d16529d7b6b89229a55c557941" data-generated-app-hash="sha256-7950cb32d67ba08eec2f105d567463a1f7abd9d16529d7b6b89229a55c557941"></script>
+<script src="js/engine-bundle.js?v=sha256-8a7d1f9c4f03136f066e5bbc0466b687a341e8d37f84ed02a85a1f4114e53592" data-generated-bundle-hash="sha256-8a7d1f9c4f03136f066e5bbc0466b687a341e8d37f84ed02a85a1f4114e53592"></script>
+<script src="js/app.js?v=sha256-343102c3ceeecd1107993e0dd244cbe6cc83bcfdab915c310c116af95bda6043" data-generated-app-hash="sha256-343102c3ceeecd1107993e0dd244cbe6cc83bcfdab915c310c116af95bda6043"></script>
 </body>
 </html>

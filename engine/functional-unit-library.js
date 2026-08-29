@@ -1,12 +1,11 @@
 /* ============================================================
  * EVSE control / diagnostic functional-unit knowledge v1
  * ------------------------------------------------------------
- * The candidate topology taxonomy below was independently audited from
- * Qwen-evse-schematic-design-1.0.29.  Its cited primary comparison DOCX
- * and image extracts are not present in that package.  Consequently the
- * variants are read-only CANDIDATE knowledge: they may be compared by an
- * engineer but can never be selected as an approved board circuit by the
- * deterministic compiler.
+ * The topology taxonomy is now indexed to the user's 79-page comparison
+ * document.  Seven representative circuits also have explicit component-
+ * pin-to-component-pin graphs in EVSE_BOARD_CIRCUIT_LIBRARY.  Observation
+ * still does not equal engineering approval: no board variant is selected
+ * automatically and all values/thresholds remain project-controlled.
  *
  * Executable generation uses only the small controlContract() API.  It
  * states which functions must be represented at an EVSE output boundary;
@@ -15,9 +14,14 @@
 window.EVSE_FUNCTIONAL_UNIT_LIBRARY = (function () {
   'use strict';
 
-  const VERSION = '1.0.0';
-  const SOURCE_STATUS = 'SECONDARY_EXTRACTION—PRIMARY_EVIDENCE_MISSING';
-  const CANDIDATE = 'CANDIDATE—ENGINEER_REVIEW_REQUIRED';
+  const VERSION = '2.0.0';
+  const PRIMARY = window.EVSE_EVIDENCE_LIBRARY;
+  const REFERENCES = window.EVSE_REFERENCE_SYSTEM_LIBRARY;
+  const BOARD = window.EVSE_BOARD_CIRCUIT_LIBRARY;
+  const SOURCE_STATUS = PRIMARY && REFERENCES && BOARD
+    ? 'PRIMARY_USER_EVIDENCE_INDEXED—ENGINEER_APPROVAL_REQUIRED'
+    : 'PRIMARY_EVIDENCE_LIBRARY_MISSING';
+  const CANDIDATE = 'OBSERVED_CANDIDATE—ENGINEER_REVIEW_REQUIRED';
 
   function variant(id, name, path, benefit, risk, applicability) {
     return Object.freeze({
@@ -136,12 +140,25 @@ window.EVSE_FUNCTIONAL_UNIT_LIBRARY = (function () {
       schema: 'EVSE-FUNCTIONAL-UNIT-KNOWLEDGE-SUMMARY/1.0',
       version: VERSION,
       sourceStatus: SOURCE_STATUS,
+      evidenceSummary: PRIMARY && typeof PRIMARY.summary === 'function' ? PRIMARY.summary() : null,
+      referenceSystemSummary: REFERENCES && typeof REFERENCES.summary === 'function' ? REFERENCES.summary() : null,
+      boardCircuitSummary: BOARD && typeof BOARD.summary === 'function' ? BOARD.summary() : null,
       automaticVariantSelectionAllowed: false,
       groupCount: Object.keys(GROUPS).length,
       variantCount: Object.keys(GROUPS).reduce((sum, id) => sum + GROUPS[id].variants.length, 0),
       groups: Object.keys(GROUPS).map((id) => ({
         id, name: GROUPS[id].name, executableMapping: GROUPS[id].executableMapping,
-        variants: GROUPS[id].variants.map((item) => ({ id: item.id, name: item.name, lifecycle: item.lifecycle }))
+        evidence: PRIMARY && Array.isArray(PRIMARY.FUNCTIONAL_FAMILIES)
+          ? PRIMARY.FUNCTIONAL_FAMILIES.find((item) => item.id === id) || null : null,
+        variants: GROUPS[id].variants.map((item) => {
+          const observed = BOARD && BOARD.VARIANTS && BOARD.VARIANTS[id]
+            ? BOARD.VARIANTS[id].find((candidate) => candidate.id === item.id) : null;
+          return {
+            id: item.id, name: item.name, lifecycle: item.lifecycle,
+            evidencePages: observed ? observed.pages.slice() : [],
+            detailTemplateId: observed ? observed.detailTemplateId : null
+          };
+        })
       })),
       instantiated: instances.filter((instance) => Array.isArray(instance.functionalUnitIds) && instance.functionalUnitIds.length)
         .map((instance) => ({ id: instance.id, tag: instance.tag, kind: instance.kind,

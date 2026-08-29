@@ -364,7 +364,7 @@ window.EVSE_DESIGN = (function () {
       branchId: o.branchId,
       implementationLevel: 'CONTROL_BOARD_FUNCTION',
       implementationStatus: 'FUNCTIONAL_REQUIREMENT—BOARD_TOPOLOGY_AND_VALUES_UNRESOLVED',
-      candidateKnowledgeRef: 'EVSE_FUNCTIONAL_UNIT_LIBRARY@1.0.0',
+      candidateKnowledgeRef: 'EVSE_FUNCTIONAL_UNIT_LIBRARY@2.0.0',
       automaticVariantSelectionAllowed: false
     };
     const generator = o.add(o.idPrefix + '-CP-GEN', 'CPG' + o.tagSuffix,
@@ -435,7 +435,7 @@ window.EVSE_DESIGN = (function () {
       safeIsolationDeviceIds: o.safeIsolationDeviceIds.slice(),
       implementationLevel: 'SAFETY_DIAGNOSTIC_FUNCTION',
       implementationStatus: 'FUNCTIONAL_REQUIREMENT—BOARD_TOPOLOGY_THRESHOLDS_AND_TIMING_UNRESOLVED',
-      candidateKnowledgeRef: 'EVSE_FUNCTIONAL_UNIT_LIBRARY@1.0.0',
+      candidateKnowledgeRef: 'EVSE_FUNCTIONAL_UNIT_LIBRARY@2.0.0',
       automaticVariantSelectionAllowed: false,
       failureAction: 'INHIBIT_ENERGY_TRANSFER'
     };

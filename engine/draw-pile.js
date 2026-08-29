@@ -20,6 +20,7 @@ window.drawPile = function drawPile(result) {
 
   const compiled = placement.compile(R.design);
   /* The exact audited IR is retained for DXF/export/package consumers. */
+  R.drawingCompiled = compiled;
   R.drawingIR = compiled.drawingIR;
   R.drawingPlan = compiled.plan;
   R.drawingPages = compiled.sheets;
@@ -34,5 +35,9 @@ window.drawPile = function drawPile(result) {
     page: Object.freeze({ current: 1, total: compiled.sheets.length || 1 })
   });
   R.drawingGeometryHash = window.EVSE_DRAWING_IR.drawingIRHash(compiled.drawingIR);
+  R.schematicQuality = window.EVSE_SCHEMATIC_QUALITY &&
+    typeof window.EVSE_SCHEMATIC_QUALITY.reviewSystem === 'function'
+    ? window.EVSE_SCHEMATIC_QUALITY.reviewSystem({ design: R.design, drawingIR: compiled.drawingIR })
+    : null;
   return renderer.render(compiled, R);
 };

@@ -14,7 +14,10 @@ function stageFor(filename) {
   if (/symbol/.test(name)) return 20;
   if (/standard/.test(name)) return 30;
   if (/connector-library/.test(name)) return 40;
+  if (name === 'evidence-library.js') return 41;
   if (/component-library/.test(name)) return 42;
+  if (name === 'reference-system-library.js') return 43;
+  if (name === 'board-circuit-library.js') return 44;
   if (/device-catalog|catalog|library/.test(name)) return 45;
   if (/design-model|netlist|topology|compiler/.test(name)) return 50;
   if (/\berc\b|validation/.test(name)) return 55;
@@ -24,6 +27,7 @@ function stageFor(filename) {
   if (/layout|placement|sheet-planner/.test(name)) return 80;
   if (/drawing-ir|geometry/.test(name)) return 84;
   if (/router|routing|crossing/.test(name)) return 86;
+  if (/editor/.test(name)) return 88;
   if (/draw-pile|renderer|render/.test(name)) return 90;
   if (/dxf|export/.test(name)) return 95;
   return 68;
@@ -51,4 +55,3 @@ function buildBrowserBundle(engineDir) {
 }
 
 module.exports = { stageFor, orderedEngineFiles, buildBrowserBundle };
-

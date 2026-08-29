@@ -15,7 +15,8 @@
   const state = {
     R: null, svg: null, zoom: 1, zoomMode: 'fit-width',
     requirement: null, providerStatus: {}, providerStatusLoaded: false,
-    requirementKey: '', generating: false, automatedInputSources: {}, initialInputValues: {}
+    requirementKey: '', generating: false, automatedInputSources: {}, initialInputValues: {},
+    editor: null, editorEnabled: false, editorDrag: null, editorUnsubscribe: null
   };
 
   function escapeHtml(value) {
@@ -312,6 +313,8 @@
       renderSummary();
       renderDesignStatus();
       renderFunctionalUnitStatus();
+      renderQualityStatus();
+      initializeSchematicEditor();
       $('empty-hint').style.display = 'none';
       $('result-area').style.display = 'block';
       logStep('✅ 已生成确定性充电桩原理图。', 'ok');
@@ -463,11 +466,383 @@
     el.innerHTML = '<div class="state-box" style="margin-top:8px"><b>控制导引与输出诊断：</b>' +
       diagnosticUnits.length + ' 个输出接口' + (diagnosticUnits.length === 1 ? '已' : '均已') +
       '建模送电前输出预检及接触器逐极状态监测；' + pilotSummary +
-      '<br><span style="color:#e3b341">板级电路、器件值、阈值和时序仍为项目待决项；下列 Qwen 来源资料只作 CANDIDATE 浏览，系统没有自动采用任何变体。</span>' +
+      '<br><span style="color:#e3b341">板级电路、器件值、阈值和时序仍为项目待决项；下列用户项目证据化拓扑只作 CANDIDATE 浏览，系统没有自动采用任何变体。</span>' +
       '<div class="state-tags">' + tags.join('') + '</div>' +
       '<details class="engine-inputs" style="margin-bottom:0"><summary>查看 ' + groups.length + ' 类 / ' + Number(knowledge.variantCount || 0) + ' 个候选拓扑（只读）</summary>' +
       groupMarkup + '</details></div>';
   }
+
+  /* ---------- 证据库、质量画像与对象化编辑 ---------- */
+  function renderQualityStatus() {
+    const host = $('quality-status');
+    if (!host || !state.R) return;
+    const quality = state.R.schematicQuality;
+    if (!quality) {
+      host.innerHTML = '<div class="state-box" style="margin-top:8px"><b>图纸质量画像：</b><span style="color:#f85149">质量规则库未加载。</span></div>';
+      return;
+    }
+    const labels = {
+      ELECTRICAL_COMPLETENESS: '电气完整性', FUNCTIONAL_SAFETY: '功能安全', DIAGNOSTIC_COVERAGE: '诊断覆盖',
+      ISOLATION_AND_PROTECTION: '隔离与保护', EMC_AND_SURGE: 'EMC与浪涌', TESTABILITY: '可测试性',
+      READABILITY: '可读性', TRACEABILITY: '可追溯性', MAINTAINABILITY: '可维护性'
+    };
+    const dimensions = Object.keys(quality.dimensions || {}).map((id) => {
+      const item = quality.dimensions[id] || {};
+      return '<div class="quality-dimension"><b>' + escapeHtml(labels[id] || id) + '</b><br>' +
+        escapeHtml(item.score == null ? '未评估' : item.score + '/100 · ' + item.status) + '</div>';
+    }).join('');
+    const failures = (quality.checks || []).filter((item) => !item.ok && item.result !== 'NOT_ASSESSED');
+    host.innerHTML = '<div class="state-box" style="margin-top:8px"><b>图纸质量画像：</b>' +
+      '<span style="color:' + (quality.status === 'PASS' ? '#78d8a4' : '#e3b341') + '">' + escapeHtml(quality.status) + '</span>' +
+      ' · 阻断 ' + Number(quality.blockingCount || 0) + ' · 未决 ' + Number(quality.unresolvedCount || 0) +
+      (failures.length ? '<br><b>需处理：</b>' + failures.slice(0, 6).map((item) =>
+        escapeHtml(item.ruleId + ' ' + item.detail)).join('；') : '') +
+      '<div class="quality-dimensions">' + dimensions + '</div>' +
+      '<div style="margin-top:6px;color:var(--text2)">' + escapeHtml(quality.note || '') + '</div></div>';
+  }
+
+  function renderEditorLibrary() {
+    const host = $('editor-library-content');
+    if (!host) return;
+    const catalog = window.EVSE_BOARD_SYMBOL_CATALOG;
+    const board = window.EVSE_BOARD_CIRCUIT_LIBRARY;
+    const evidence = window.EVSE_EVIDENCE_LIBRARY;
+    const references = window.EVSE_REFERENCE_SYSTEM_LIBRARY;
+    if (!catalog || !board || !evidence || !references) {
+      host.innerHTML = '<div class="muted" style="color:#f85149">板级符号/电路/证据/真实项目参考库未完整加载。</div>';
+      return;
+    }
+    const summary = board.summary();
+    const referenceSummary = references.summary();
+    const symbols = catalog.ids.map((id) => {
+      const definition = catalog.resolve(id);
+      return '<div class="editor-symbol-card" title="' + escapeHtml(definition.standardFamily + ' · ' + definition.lifecycle) + '">' +
+        catalog.svgPreview(id, { width: 100, height: 65 }) + '<div>' + escapeHtml(definition.name) + '</div></div>';
+    }).join('');
+    const templates = Object.keys(board.TEMPLATES).sort().map((id) => {
+      const item = board.TEMPLATES[id];
+      const pages = ((item.sourceRefs || [])[0] || {}).pages || [];
+      return '<div class="editor-object" onclick="showBoardTemplate(\'' + escapeHtml(id) + '\')"><b>' +
+        escapeHtml(item.name) + '</b><br><span class="muted">' + item.components.length + ' 元件 · ' + item.circuits.length +
+        ' 条 PIN→PIN · 文档 p.' + escapeHtml(pages.join('–')) + '</span></div>';
+    }).join('');
+    const referenceCards = Object.keys(references.SYSTEMS).sort().map((id) => {
+      const item = references.SYSTEMS[id];
+      const inferred = item.connections.filter((wire) => wire.evidenceStatus === references.TRACE.INFERRED).length;
+      return '<div class="editor-object" onclick="showReferenceSystem(\'' + escapeHtml(id) + '\')"><b>' +
+        escapeHtml(item.name) + '</b><br><span class="muted">' + item.devices.length + ' 器件 · ' + item.connections.length +
+        ' 条端点关系 · ' + item.functionalUnits.length + ' 功能单元 · 推断待核 ' + inferred + '</span></div>';
+    }).join('');
+    host.innerHTML = '<div class="muted" style="margin:8px 0">' + catalog.ids.length + ' 类板级符号 · ' +
+      Object.keys(board.TEMPLATES).length + ' 个详细功能模板 · ' +
+      Number(summary.explicitPointToPointCircuitCount || 0) + ' 条逻辑端口点对点连接（物理封装脚号未决） · ' +
+      Number(summary.variantCount || 0) + ' 个候选拓扑<br>' +
+      referenceSummary.referenceCount + ' 份真实系统图 · ' + referenceSummary.deviceCount + ' 个器件 · ' +
+      referenceSummary.connectionCount + ' 条 partial trace 系统端点关系 · 未决 ' +
+      Number(referenceSummary.unresolvedItemCount || 0) + '（明确标注 / 可见走线 / 推断待核分级）</div>' +
+      '<details open><summary>真实项目系统参考（只读对照）</summary>' + referenceCards + '</details>' +
+      '<details open><summary>详细功能单元模板</summary>' + templates + '</details>' +
+      '<details><summary>IEC/GB 风格板级符号（' + catalog.ids.length + '）</summary><div class="editor-symbol-grid">' + symbols + '</div></details>';
+  }
+
+  window.showReferenceSystem = function (id) {
+    const references = window.EVSE_REFERENCE_SYSTEM_LIBRARY;
+    const item = references && references.find(id);
+    const host = $('editor-inspector-content');
+    if (!item || !host) return;
+    const validation = references.validate(item);
+    const traceLabel = {};
+    traceLabel[references.TRACE.LABELLED] = '端子标注+走线明确';
+    traceLabel[references.TRACE.VISIBLE] = '走线可见/块端口泛化';
+    traceLabel[references.TRACE.INFERRED] = '功能推断—必须复核';
+    host.innerHTML = '<div class="inspector-row"><span>真实项目参考</span><b>' + escapeHtml(item.name) + '</b></div>' +
+      '<div class="inspector-row"><span>标准 / 接口</span><span>' + escapeHtml(item.standard + ' / ' + item.interface) + '</span></div>' +
+      '<div class="inspector-row"><span>源证据</span><span>' + escapeHtml(item.sourceId) + '</span></div>' +
+      '<div class="inspector-row"><span>自动选型</span><b style="color:#e3b341">禁止</b></div>' +
+      '<div class="inspector-row"><span>端点校验</span><b style="color:' + (validation.ok ? '#78d8a4' : '#f85149') + '">' +
+        escapeHtml(validation.ok ? '结构 PASS' : 'FAIL') + '</b></div>' +
+      '<div class="inspector-row"><span>逐PIN提取</span><b style="color:' + (validation.complete ? '#78d8a4' : '#e3b341') + '">' +
+        escapeHtml(validation.complete ? 'COMPLETE' : 'PARTIAL · 未决 ' + validation.unresolved.length) + '</b></div>' +
+      '<details open><summary>功能单元（' + item.functionalUnits.length + '）</summary>' + item.functionalUnits.map((entry) =>
+        '<div class="editor-object"><b>' + escapeHtml(entry.name) + '</b><br>' + escapeHtml(entry.functions.join(' · ')) +
+        '<br><span class="muted">' + entry.deviceIds.length + ' 器件 / ' + entry.connectionIds.length + ' 关系</span></div>').join('') + '</details>' +
+      '<details><summary>器件与PIN（' + item.devices.length + '）</summary><div class="inspector-pins">' + item.devices.map((part) =>
+        '<div class="editor-object"><b>' + escapeHtml(part.ref + ' ' + part.name) + '</b><br>' +
+        escapeHtml(part.pins.map((port) => port.id + '=' + port.label).join(' · ')) + '</div>').join('') + '</div></details>' +
+      '<details><summary>端点关系（' + item.connections.length + '）</summary><div class="inspector-pins">' + item.connections.map((wire) =>
+        '<div class="editor-object" style="border-color:' + (wire.evidenceStatus === references.TRACE.INFERRED ? '#8a6235' : '#29466f') + '"><b>' +
+        escapeHtml(wire.id + ' ' + wire.net) + '</b><br>' + escapeHtml(wire.from + ' → ' + wire.to) +
+        '<br><span class="muted">' + escapeHtml(traceLabel[wire.evidenceStatus] || wire.evidenceStatus) +
+        (wire.note ? ' · ' + escapeHtml(wire.note) : '') + '</span></div>').join('') + '</div></details>' +
+      '<details open><summary>未决项（生产使用前必须关闭）</summary>' + item.unresolved.map((note) =>
+        '<div class="editor-object" style="color:#e3b341">' + escapeHtml(note) + '</div>').join('') + '</details>';
+  };
+
+  window.showBoardTemplate = function (id) {
+    const board = window.EVSE_BOARD_CIRCUIT_LIBRARY;
+    const qualityRules = window.EVSE_SCHEMATIC_QUALITY;
+    const item = board && board.findTemplate(id);
+    const host = $('editor-inspector-content');
+    if (!item || !host) return;
+    const quality = qualityRules && qualityRules.reviewBoardTemplate(id);
+    host.innerHTML = '<div class="inspector-row"><span>功能单元</span><b>' + escapeHtml(item.name) + '</b></div>' +
+      '<div class="inspector-row"><span>模板ID</span><span>' + escapeHtml(item.id) + '</span></div>' +
+      '<div class="inspector-row"><span>生命周期</span><span>' + escapeHtml(item.lifecycle) + '</span></div>' +
+      '<div class="inspector-row"><span>元件/导线</span><span>' + item.components.length + ' / ' + item.circuits.length + '</span></div>' +
+      '<div class="inspector-row"><span>安全不变量</span><span>' + escapeHtml(item.safetyInvariant || item.warning || item.note || '项目复核') + '</span></div>' +
+      '<details open><summary>元器件实例</summary><div class="inspector-pins">' + item.components.map((part) =>
+        '<div class="editor-object"><b>' + escapeHtml(part.ref) + '</b> · ' + escapeHtml(part.symbolId) + '<br>' + escapeHtml(part.value || '') + '</div>').join('') + '</div></details>' +
+      '<details><summary>PIN→PIN 连线</summary><div class="inspector-pins">' + item.circuits.map((wire) =>
+        '<div class="editor-object"><b>' + escapeHtml(wire.id + ' ' + wire.net) + '</b><br>' + escapeHtml(wire.from + ' → ' + wire.to) + '</div>').join('') + '</div></details>' +
+      (quality ? '<details><summary>质量规则：' + escapeHtml(quality.status) + '</summary>' + quality.checks.map((entry) =>
+        '<div class="editor-object" style="color:' + (entry.ok ? '#78d8a4' : entry.result === 'NOT_ASSESSED' ? '#8b9bb4' : '#e3b341') + '"><b>' +
+        escapeHtml(entry.ruleId + ' ' + entry.result) + '</b><br>' + escapeHtml(entry.detail) + '</div>').join('') + '</details>' : '');
+  };
+
+  function setEditorStatus(message, error) {
+    const host = $('editor-status');
+    if (!host) return;
+    host.textContent = String(message || '');
+    host.style.borderColor = error ? '#8a3a3a' : '#29466f';
+    host.style.color = error ? '#ff9b9b' : '#b7d5f4';
+  }
+  function updateEditorControls() {
+    const snapshot = state.editor && state.editor.snapshot();
+    if ($('editor-undo')) $('editor-undo').disabled = !snapshot || !snapshot.canUndo;
+    if ($('editor-redo')) $('editor-redo').disabled = !snapshot || !snapshot.canRedo;
+    if ($('editor-reset')) $('editor-reset').disabled = !snapshot || snapshot.revision === 0;
+    const toggle = $('editor-toggle');
+    if (toggle) toggle.textContent = state.editorEnabled ? '✎ 退出编辑' : '✎ 在线编辑';
+    const workspace = $('editor-workspace');
+    if (workspace) workspace.textContent = document.body.classList.contains('workspace-mode') ? '⤢ 返回参数' : '⛶ 全屏工作台';
+  }
+  function setEditorEnabled(enabled) {
+    state.editorEnabled = !!enabled && !!state.editor;
+    const shell = $('editor-shell'); const box = $('d-pile'); const svg = getSvg();
+    if (shell) shell.classList.toggle('active', state.editorEnabled);
+    if (box) box.classList.toggle('editor-active', state.editorEnabled);
+    if (svg) svg.classList.toggle('editor-active', state.editorEnabled);
+    updateEditorControls();
+    if (state.editorEnabled) setEditorStatus('已进入对象化编辑：拖动器件；拖动导线的中间线段；点击文字图示后可改内容。每次提交都会重新运行几何和端点 ERC。');
+  }
+  window.toggleEditor = function () { setEditorEnabled(!state.editorEnabled); };
+  window.toggleEditorWorkspace = function () {
+    document.body.classList.toggle('workspace-mode');
+    if (!state.editorEnabled) setEditorEnabled(true);
+    updateEditorControls();
+    setTimeout(() => { applyZoom(); }, 0);
+  };
+
+  function initializeSchematicEditor() {
+    if (state.editorUnsubscribe) state.editorUnsubscribe();
+    state.editor = null; state.editorDrag = null;
+    const api = window.EVSE_SCHEMATIC_EDITOR;
+    if (!api || !state.R || !state.R.drawingIR) {
+      setEditorStatus('编辑内核或 Drawing IR 未加载。', true); updateEditorControls(); return;
+    }
+    try {
+      state.editor = api.createSession({ drawingIR: state.R.drawingIR, model: state.R.design, historyLimit: 100 });
+      state.editorUnsubscribe = state.editor.subscribe(() => updateEditorControls());
+      renderEditorLibrary(); bindEditorEvents(); renderEditorInspector();
+      setEditorEnabled(true);
+    } catch (error) {
+      setEditorStatus('编辑器未能打开：' + humanError(error), true); updateEditorControls();
+    }
+  }
+
+  function editorTarget(element) {
+    if (!element || !element.closest) return null;
+    const device = element.closest('g[id^="DEVICE-"]');
+    if (device) return { kind: 'device', id: device.getAttribute('data-equipment'), node: device };
+    const route = element.closest('g[id^="ROUTE-"]');
+    if (route) return { kind: 'route', id: route.getAttribute('data-route'), node: route };
+    const annotationRoot = element.closest('#EVSE-IR-ANNOTATIONS');
+    if (annotationRoot) {
+      const primitive = element.closest('[data-primitive]');
+      if (primitive) return { kind: 'annotation', id: primitive.getAttribute('data-primitive'), node: primitive };
+    }
+    return null;
+  }
+  function svgPoint(svg, event) {
+    if (!svg || !svg.createSVGPoint || !svg.getScreenCTM()) return { x: event.clientX, y: event.clientY };
+    const point = svg.createSVGPoint(); point.x = event.clientX; point.y = event.clientY;
+    return point.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  function distanceToSegment(point, segment) {
+    if (segment.orientation === 'horizontal') {
+      const x = Math.max(Math.min(segment.x1, segment.x2), Math.min(Math.max(segment.x1, segment.x2), point.x));
+      return Math.hypot(point.x - x, point.y - segment.y1);
+    }
+    const y = Math.max(Math.min(segment.y1, segment.y2), Math.min(Math.max(segment.y1, segment.y2), point.y));
+    return Math.hypot(point.x - segment.x1, point.y - y);
+  }
+  function nearestEditableSegment(route, point) {
+    const candidates = (route && route.segments || []).filter((segment) =>
+      segment.index > 0 && segment.index < route.segments.length - 1);
+    return candidates.sort((a, b) => distanceToSegment(point, a) - distanceToSegment(point, b))[0] || null;
+  }
+  function clearEditorHighlight() {
+    const box = $('d-pile'); if (!box) return;
+    box.querySelectorAll('[data-editor-selected="true"]').forEach((node) => node.removeAttribute('data-editor-selected'));
+  }
+  function highlightEditorSelection() {
+    clearEditorHighlight();
+    const selection = state.editor && state.editor.selection; if (!selection) return;
+    let node = null;
+    if (selection.kind === 'device') node = document.getElementById('DEVICE-' + selection.id);
+    if (selection.kind === 'route') node = document.getElementById('ROUTE-' + selection.id);
+    if (selection.kind === 'annotation') node = Array.from(($('d-pile') || document).querySelectorAll('[data-primitive]'))
+      .find((item) => item.getAttribute('data-primitive') === selection.id);
+    if (node) node.setAttribute('data-editor-selected', 'true');
+  }
+  function selectEditorObject(target) {
+    if (!state.editor) return;
+    state.editor.select(target ? target.kind : null, target ? target.id : null);
+    highlightEditorSelection(); renderEditorInspector();
+  }
+
+  function renderEditorInspector() {
+    const host = $('editor-inspector-content');
+    if (!host || !state.editor) return;
+    const selected = state.editor.selection;
+    if (!selected) {
+      host.innerHTML = '<div class="muted">点击器件、导线或图示对象查看属性。拖动器件；拖动导线中间线段可修改走线。</div>';
+      return;
+    }
+    const item = state.editor.inspect(selected.kind, selected.id);
+    if (!item) { host.innerHTML = '<div class="muted">所选对象已不存在。</div>'; return; }
+    if (selected.kind === 'device') {
+      const x = item.bbox.xMin != null ? item.bbox.xMin : item.bbox.x;
+      const y = item.bbox.yMin != null ? item.bbox.yMin : item.bbox.y;
+      host.innerHTML = '<div class="inspector-row"><span>设备ID</span><b>' + escapeHtml(item.id) + '</b></div>' +
+        '<div class="inspector-row"><span>位号</span><span>' + escapeHtml(item.tag || item.referenceDesignation || '—') + '</span></div>' +
+        '<div class="inspector-row"><span>器件类型</span><span>' + escapeHtml(item.type) + '</span></div>' +
+        '<div class="inspector-row"><span>符号</span><span>' + escapeHtml(item.symbolId) + '</span></div>' +
+        '<div class="inspector-row"><span>位置</span><span>X <input class="form-input" id="editor-x" value="' + x + '" style="width:72px;padding:3px"> Y <input class="form-input" id="editor-y" value="' + y + '" style="width:72px;padding:3px"> <button class="mini-btn" onclick="editorMoveSelectedTo()">移动</button></span></div>' +
+        '<details open><summary>端子 / PIN（' + (item.ports || []).length + '）</summary><div class="inspector-pins">' +
+        (item.ports || []).map((port) => '<div class="editor-object"><b>' + escapeHtml(port.terminalId || port.id) + '</b> · ' +
+          escapeHtml(port.label || '') + '<br>' + escapeHtml(port.ref + ' @ ' + port.x + ',' + port.y) + '</div>').join('') + '</div></details>';
+    } else if (selected.kind === 'route') {
+      host.innerHTML = '<div class="inspector-row"><span>导线ID</span><b>' + escapeHtml(item.id) + '</b></div>' +
+        '<div class="inspector-row"><span>网络</span><span>' + escapeHtml(item.netId) + '</span></div>' +
+        '<div class="inspector-row"><span>回路</span><span>' + escapeHtml(item.circuitId) + '</span></div>' +
+        '<div class="inspector-row"><span>起点PIN</span><span>' + escapeHtml(item.source.ref) + '</span></div>' +
+        '<div class="inspector-row"><span>终点PIN</span><span>' + escapeHtml(item.target.ref) + '</span></div>' +
+        '<div class="inspector-row"><span>层</span><span>' + escapeHtml(item.layer) + '</span></div>' +
+        '<details open><summary>正交线段（' + item.segments.length + '）</summary><div class="inspector-pins">' + item.segments.map((segment) =>
+          '<div class="editor-object"><b>S' + segment.index + ' ' + escapeHtml(segment.orientation) + '</b><br>' +
+          escapeHtml(segment.x1 + ',' + segment.y1 + ' → ' + segment.x2 + ',' + segment.y2) +
+          (segment.index === 0 || segment.index === item.segments.length - 1 ? '<br><span style="color:#e3b341">端子邻接线段锁定</span>' : '') + '</div>').join('') + '</div></details>';
+    } else {
+      host.innerHTML = '<div class="inspector-row"><span>图示ID</span><b>' + escapeHtml(item.id) + '</b></div>' +
+        '<div class="inspector-row"><span>类型</span><span>' + escapeHtml(item.kind) + '</span></div>' +
+        (item.kind === 'text' ? '<label class="form-label" style="margin-top:8px">文字内容</label><textarea class="form-input" id="editor-annotation-text" rows="4">' +
+          escapeHtml(item.text) + '</textarea><button class="mini-btn" style="margin-top:6px" onclick="editorApplyAnnotationText()">应用文字</button>' :
+          '<div class="muted" style="margin-top:8px">拖动此对象修改位置。</div>');
+    }
+  }
+
+  window.editorMoveSelectedTo = function () {
+    const selection = state.editor && state.editor.selection;
+    const item = selection && state.editor.inspect(selection.kind, selection.id);
+    if (!item || selection.kind !== 'device') return;
+    const x = Number($('editor-x').value); const y = Number($('editor-y').value);
+    const oldX = item.bbox.xMin != null ? item.bbox.xMin : item.bbox.x;
+    const oldY = item.bbox.yMin != null ? item.bbox.yMin : item.bbox.y;
+    applyEditorCommand(state.editor.moveDevice(item.id, x - oldX, y - oldY, { grid: 5 }));
+  };
+  window.editorApplyAnnotationText = function () {
+    const selection = state.editor && state.editor.selection;
+    if (!selection || selection.kind !== 'annotation') return;
+    applyEditorCommand(state.editor.editAnnotationText(selection.id, $('editor-annotation-text').value));
+  };
+
+  function bindEditorEvents() {
+    const svg = getSvg(); if (!svg || !state.editor) return;
+    svg.classList.toggle('editor-active', state.editorEnabled);
+    svg.addEventListener('click', (event) => {
+      if (!state.editorEnabled || state.editorDrag) return;
+      const target = editorTarget(event.target);
+      if (target) { event.preventDefault(); event.stopPropagation(); }
+      selectEditorObject(target);
+    });
+    svg.addEventListener('pointerdown', (event) => {
+      if (!state.editorEnabled || event.button !== 0) return;
+      const target = editorTarget(event.target); if (!target) return;
+      const start = svgPoint(svg, event); let segment = null;
+      if (target.kind === 'route') segment = nearestEditableSegment(state.editor.inspect('route', target.id), start);
+      if (target.kind === 'route' && !segment) { selectEditorObject(target); setEditorStatus('该导线没有可拖动的中间线段；端子邻接段保持锁定。', true); return; }
+      selectEditorObject(target);
+      state.editorDrag = { pointerId: event.pointerId, target, start, current: start, segment,
+        originalTransform: target.node.getAttribute('transform') || '' };
+      target.node.setAttribute('data-editor-dragging', 'true');
+      if (svg.setPointerCapture) svg.setPointerCapture(event.pointerId);
+      event.preventDefault(); event.stopPropagation();
+    });
+    svg.addEventListener('pointermove', (event) => {
+      const drag = state.editorDrag; if (!drag || drag.pointerId !== event.pointerId) return;
+      drag.current = svgPoint(svg, event);
+      const dx = drag.current.x - drag.start.x; const dy = drag.current.y - drag.start.y;
+      if (drag.target.kind !== 'route') {
+        drag.target.node.setAttribute('transform', (drag.originalTransform ? drag.originalTransform + ' ' : '') + 'translate(' + dx + ' ' + dy + ')');
+      } else {
+        const delta = drag.segment.orientation === 'horizontal' ? dy : dx;
+        setEditorStatus('导线 ' + drag.target.id + ' · S' + drag.segment.index + ' 预移动 ' + Math.round(delta / 5) * 5 + '；松开后执行 ERC。');
+      }
+      event.preventDefault();
+    });
+    const finish = (event) => {
+      const drag = state.editorDrag; if (!drag || drag.pointerId !== event.pointerId) return;
+      state.editorDrag = null;
+      drag.target.node.removeAttribute('data-editor-dragging');
+      if (drag.originalTransform) drag.target.node.setAttribute('transform', drag.originalTransform);
+      else drag.target.node.removeAttribute('transform');
+      const current = drag.current || drag.start; const dx = current.x - drag.start.x; const dy = current.y - drag.start.y;
+      let response;
+      if (Math.hypot(dx, dy) < 1.5) { highlightEditorSelection(); return; }
+      if (drag.target.kind === 'device') response = state.editor.moveDevice(drag.target.id, dx, dy, { grid: 5 });
+      else if (drag.target.kind === 'annotation') response = state.editor.moveAnnotation(drag.target.id, dx, dy, { grid: 5 });
+      else response = state.editor.moveRouteSegment(drag.target.id, drag.segment.index,
+        drag.segment.orientation === 'horizontal' ? dy : dx, { grid: 5 });
+      applyEditorCommand(response);
+      event.preventDefault();
+    };
+    svg.addEventListener('pointerup', finish); svg.addEventListener('pointercancel', finish);
+    highlightEditorSelection();
+  }
+
+  function rerenderEditedDrawing() {
+    if (!state.editor || !state.R) return;
+    const renderer = window.EVSE_SVG_IR_RENDERER; const skill = window.EVSE_DRAWING_SKILL;
+    const ir = state.editor.drawingIR;
+    const compiled = Object.assign({}, state.R.drawingCompiled || {}, { drawingIR: ir });
+    state.R.drawingCompiled = compiled; state.R.drawingIR = ir;
+    state.R.drawingGeometryHash = window.EVSE_DRAWING_IR.drawingIRHash(ir);
+    state.R.editableDocument = state.editor.exportDocument();
+    state.R.schematicQuality = window.EVSE_SCHEMATIC_QUALITY.reviewSystem({ design: state.R.design, drawingIR: ir });
+    const markup = renderer.render(compiled, state.R);
+    $('d-pile').innerHTML = markup; state.svg = markup;
+    if (skill && typeof skill.auditMarkup === 'function') {
+      const audit = skill.auditMarkup(markup, DRAWING_KEY, state.R);
+      skill.recordDrawingAudit(state.R, DRAWING_KEY, audit);
+      $('d-pile').dataset.drawingRuleStatus = audit.status;
+      if (typeof skill.finalizeDrawingAudits === 'function') skill.finalizeDrawingAudits(state.R);
+    }
+    stampAudit(); applyZoom(); bindEditorEvents(); renderEditorInspector(); renderQualityStatus(); updateEditorControls();
+  }
+  function applyEditorCommand(response) {
+    if (!response) return;
+    if (!response.accepted) {
+      const counts = response.details && ((response.details.violations || []).length + (response.details.coverageErrors || []).length);
+      setEditorStatus('⛔ ' + (response.message || response.code) + (counts ? '（' + counts + ' 项违规）' : ''), true);
+      highlightEditorSelection(); updateEditorControls(); return;
+    }
+    rerenderEditedDrawing();
+    setEditorStatus('已提交 ' + response.command.type + ' · 修订 ' + response.command.revision + ' · ' + response.command.geometryHash + '；几何和端点 ERC 通过。');
+  }
+  window.editorUndo = function () { if (state.editor) applyEditorCommand(state.editor.undo()); };
+  window.editorRedo = function () { if (state.editor) applyEditorCommand(state.editor.redo()); };
+  window.editorReset = function () { if (state.editor) applyEditorCommand(state.editor.reset()); };
 
   /* ---------- 缩放 ---------- */
   function getSvg() {
