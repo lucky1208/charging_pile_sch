@@ -61,3 +61,15 @@ test('Web 提供真实项目参考矩阵并明确区分可见走线和待复核�
   assert.match(app, /功能推断—必须复核/);
   assert.match(html, /推断待核三级保存/);
 });
+
+test('Web 编辑器提供实时跟线、自动避让、挤推、图层和键盘事务入口', () => {
+  assert.match(html, /EVSE-EDITOR-PREVIEW/);
+  assert.match(html, /挤推重布相邻导线/);
+  assert.match(app, /previewDeviceMove/);
+  assert.match(app, /previewRouteSegment/);
+  assert.match(app, /connectionsForPort/);
+  assert.match(app, /data-editor-layer/);
+  assert.match(app, /event\.ctrlKey \|\| event\.metaKey/);
+  assert.match(app, /window\.editorUndo\(\)/);
+  assert.match(app, /cancelEditorDrag/);
+});

@@ -1,4 +1,4 @@
-# EVSE Schematic Design 2.3
+# EVSE Schematic Design 2.4
 
 这是一个方案级充电桩电气设计编译器。输入经过需求确认后，被编译为 EDEM v4.1 端子级网表；SVG 和 DXF 都从同一 Drawing IR 生成，并由 ERC、几何与图模覆盖闸门 fail-closed。
 
@@ -14,9 +14,10 @@
 - **控制导引与输出安全诊断**：每个适用物理接口建立 CP 发生、高阻采样和车辆二极管检查；每个输出建立接触器下游逐导体预检、接触器反馈/粘连监测与 fail-closed 状态机。板级器件值、阈值和时序保持项目待决。
 - **Qwen 参考迁移**：保留 7 类/32 个候选拓扑作为只读知识，不自动选型；拒绝第二套手绘网表、主观评分和字符串自证闸门。证据与取舍见 [Qwen 参考代码审计与迁移](docs/QWEN-REFERENCE-MIGRATION.md)。
 - **用户项目证据与真实系统参考**：完整索引 79 页 `对比.docx`，重建 29 类板级矢量符号、7 个详细 PIN→PIN 功能模板（108 条板级逻辑端点连线），并把欧标储能图与国标 60kW 图整理为 2 份只读、部分追线的系统参考（70 个器件、185 条端点关系、9 个功能单元）。其中 56 条来自可读端子标注，120 条来自可见走线但仍含聚合端口，9 条是明确标记的功能推断；当前仍有 100 个未决项，结构校验通过不等于逐 PIN 提取完整。封装物理脚号缺失的多 PIN 器件会报告 `PACKAGE_PIN_MAP_REQUIRED`，任何参考实例都禁止自动成为产品拓扑。
-- **在线对象化编辑第一阶段**：可选择和检查已有器件、PIN、网络、导线、图示与文字；可拖动已有器件、已有导线的中间正交线段和注释，修改文字，并支持撤销/重做/恢复自动布局。每次提交重建 Drawing IR 并重新执行端点覆盖与几何闸门；非法编辑事务回滚。当前不支持交互式新建/删除网络、障碍传播式“挤推布线”或多页层次化工程图编辑。
+- **在线对象化编辑 2.0**：器件拖动时逐 PIN 导线实时跟随，落点后以器件为硬障碍进行确定性正交重布；移动中间线段时锁定用户线并挤推重布冲突回路。属性栏显示网络、回路和对端 PIN，支持 CAD 图层、键盘撤销/重做/取消、器件碰撞/越界检查和事务回滚。无合法路径时绝不穿器件交付。当前仍不支持未经 EDEM 校验的新建/删除网络或多页层次化工程图编辑。
+- **Claude EDA 参考审计**：吸收对象命中、局部重布、稀疏正交寻路、标签软避让、图层与键盘工作流；拒绝穿器件 fallback、客户端密钥、猜测网络域、只保存坐标的伪撤销和可掩盖几何失败的评分。证据、实测缺陷、迁移内容与剩余边界见 [Claude 在线 EDA 参考代码审计与 2.4 集成说明](docs/CLAUDE-EDA-REFERENCE-INTEGRATION.md)。
 
-详细架构见 [P0–P3 架构与安全边界](docs/P0-P3-ARCHITECTURE.md)；2.2 的历史验收基线见 [P0–P3 验收报告](docs/P0-P3-VERIFICATION.md)、[控制导引与输出诊断验收](docs/FUNCTIONAL-SAFETY-VERIFICATION.md) 和 [216 矩阵验收报告](docs/P2-DRAWING-IR-VERIFICATION.md)；2.3 本轮边界见 [用户项目图纸证据与在线编辑阶段报告](docs/USER-PROJECT-EVIDENCE-EDITOR.md)，最终增量回归见 [2.3 验收报告](docs/EVSE-2.3-VERIFICATION.md)。
+详细架构见 [P0–P3 架构与安全边界](docs/P0-P3-ARCHITECTURE.md)；2.2 的历史验收基线见 [P0–P3 验收报告](docs/P0-P3-VERIFICATION.md)、[控制导引与输出诊断验收](docs/FUNCTIONAL-SAFETY-VERIFICATION.md) 和 [216 矩阵验收报告](docs/P2-DRAWING-IR-VERIFICATION.md)；2.3 的用户图纸证据边界见 [用户项目图纸证据与在线编辑阶段报告](docs/USER-PROJECT-EVIDENCE-EDITOR.md) 与 [2.3 验收报告](docs/EVSE-2.3-VERIFICATION.md)；2.4 编辑路由增量见 [Claude 参考集成说明](docs/CLAUDE-EDA-REFERENCE-INTEGRATION.md) 与 [2.4 验收报告](docs/EVSE-2.4-VERIFICATION.md)。
 
 ## 快速生成
 

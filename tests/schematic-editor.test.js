@@ -74,7 +74,7 @@ test('geometry or keepout violation rejects the command and rolls back', () => {
   const before = session.snapshot().geometryHash;
   const rejected = session.moveDevice('EQ-A', 100, 40, { grid: 5 });
   assert.equal(rejected.accepted, false);
-  assert.equal(rejected.code, 'EDIT_REJECTED_BY_ERC');
+  assert.equal(rejected.code, 'DEVICE_BODY_COLLISION');
   assert.equal(session.snapshot().geometryHash, before);
   assert.equal(session.snapshot().canUndo, false);
 });

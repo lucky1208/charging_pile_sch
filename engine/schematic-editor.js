@@ -9,17 +9,21 @@
 (function (root, factory) {
   'use strict';
   let ir = root && root.EVSE_DRAWING_IR;
+  let router = root && root.EVSE_SCHEMATIC_EDIT_ROUTER;
   if (!ir && typeof module === 'object' && module && module.exports && typeof require === 'function') {
     ir = require('./drawing-ir.js');
   }
-  const api = factory(ir);
+  if (!router && typeof module === 'object' && module && module.exports && typeof require === 'function') {
+    router = require('./schematic-edit-router.js');
+  }
+  const api = factory(ir, router);
   if (root) root.EVSE_SCHEMATIC_EDITOR = api;
   if (typeof module === 'object' && module && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window :
-  (typeof globalThis !== 'undefined' ? globalThis : this), function (IR) {
+  (typeof globalThis !== 'undefined' ? globalThis : this), function (IR, ROUTER) {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '2.0.0';
   const SCHEMA = 'EVSE-SCHEMATIC-EDITOR-SESSION/1.0';
 
   class EditorError extends Error {
@@ -144,6 +148,41 @@
       return route;
     });
   }
+  function connectedRouteIds(routes, deviceIds) {
+    return routes.filter((route) => deviceIds.has(route.source.deviceId) || deviceIds.has(route.target.deviceId))
+      .map((route) => route.id).sort(compareText);
+  }
+  function shiftedRouteSegment(route, segmentIndex, amount) {
+    const value = clone(route); const segment = value.segments[Number(segmentIndex)];
+    if (!segment) throw new EditorError('SEGMENT_NOT_FOUND', '线段不存在。', { routeId: route.id, segmentIndex });
+    if (segment.index === 0 || segment.index === value.segments.length - 1) {
+      throw new EditorError('ENDPOINT_SEGMENT_LOCKED', '端子相邻线段锁定；请移动器件或选择中间线段。');
+    }
+    const a = segment.index; const b = a + 1;
+    if (segment.orientation === 'horizontal') { value.points[a].y += amount; value.points[b].y += amount; }
+    else { value.points[a].x += amount; value.points[b].x += amount; }
+    return normalizeRoute(value);
+  }
+  function routerOptions(ir, options) {
+    const supplied = options || {};
+    const readability = ir && ir.metadata && ir.metadata.readability || {};
+    const pitch = Math.max(4, Number(readability.routeLanePitchMin) || 12);
+    const sheet = ir && ir.metadata && ir.metadata.sheet;
+    return {
+      deviceClearance: supplied.deviceClearance == null ? Math.max(4, pitch * 0.55) : supplied.deviceClearance,
+      deviceSpacing: supplied.deviceSpacing == null ? 0 : supplied.deviceSpacing,
+      wireSpacing: supplied.wireSpacing == null ? Math.max(4, pitch * 0.65) : supplied.wireSpacing,
+      escapeDistance: supplied.escapeDistance == null ? Math.max(8, pitch) : supplied.escapeDistance,
+      maxAffectedRoutes: supplied.maxAffectedRoutes == null ? 64 : supplied.maxAffectedRoutes,
+      maxAxes: supplied.maxAxes == null ? 58 : supplied.maxAxes,
+      maxExpandedStates: supplied.maxExpandedStates == null ? 14000 : supplied.maxExpandedStates,
+      margins: supplied.margins || [48, 120, 280],
+      sheetBounds: supplied.sheetBounds || (sheet && Number.isFinite(Number(sheet.canvasWidth)) &&
+        Number.isFinite(Number(sheet.canvasHeight)) ? {
+          xMin: 0, yMin: 0, xMax: Number(sheet.canvasWidth), yMax: Number(sheet.canvasHeight)
+        } : null)
+    };
+  }
   function translateAnnotation(value, dx, dy) {
     const item = clone(value);
     if (item.kind === 'rect' || item.kind === 'text') { item.x += dx; item.y += dy; }
@@ -163,7 +202,8 @@
     const journal = []; const listeners = new Set();
 
     function emit(event) { listeners.forEach((listener) => { try { listener(event); } catch (_) { /* observer isolation */ } }); }
-    function snapshot() { return Object.freeze({ schema: SCHEMA, version: VERSION, revision, drawingIR: current,
+    function snapshot() { return Object.freeze({ schema: SCHEMA, version: VERSION,
+      routerVersion: ROUTER && ROUTER.VERSION || '', revision, drawingIR: current,
       selection: selection ? Object.freeze(Object.assign({}, selection)) : null,
       canUndo: history.length > 0, canRedo: future.length > 0,
       geometryHash: IR.drawingIRHash(current), journalLength: journal.length }); }
@@ -195,8 +235,11 @@
       const o2 = options || {}; const x = snap(finite(dx, 'dx'), o2.grid); const y = snap(finite(dy, 'dy'), o2.grid);
       const list = Array.from(new Set((Array.isArray(ids) ? ids : [ids]).map(String))).sort(compareText);
       if (!x && !y) return fail('NO_MOVEMENT', '移动量为0。');
-      return transact('MOVE_DEVICES', { ids: list, dx: x, dy: y, grid: Number(o2.grid) || 0 }, (state) => {
+      const payload = { ids: list, dx: x, dy: y, grid: Number(o2.grid) || 0, reroutedRouteIds: [] };
+      return transact('MOVE_DEVICES', payload, (state) => {
+        if (!ROUTER) throw new EditorError('EDIT_ROUTER_MISSING', '自动避让路由内核未加载。');
         const targets = new Set(list); const found = new Set();
+        const affectedRouteIds = connectedRouteIds(state.routes, targets);
         state.devices = state.devices.map((device) => {
           if (!targets.has(device.id)) return device;
           found.add(device.id); return translateDevice(device, x, y);
@@ -204,24 +247,64 @@
         const missing = list.filter((id) => !found.has(id));
         if (missing.length) throw new EditorError('DEVICE_NOT_FOUND', '设备不存在：' + missing.join(', '), { missing });
         state.routes = moveConnectedRoutes(state.routes, targets, x, y);
+        const routeOptions = routerOptions(current, o2);
+        ROUTER.assertDevicePlacement(state.devices, list, state.metadata, routeOptions);
+        const routed = ROUTER.rerouteAffected({ devices: state.devices, routes: state.routes,
+          annotations: state.annotations, affectedRouteIds, options: routeOptions });
+        state.routes = Array.from(routed.routes);
+        payload.reroutedRouteIds = Array.from(routed.reroutedRouteIds);
+        payload.routingPasses = routed.passes;
       });
     }
     function moveRouteSegment(routeId, segmentIndex, delta, options) {
       const o2 = options || {}; const amount = snap(finite(delta, 'delta'), o2.grid);
       if (!amount) return fail('NO_MOVEMENT', '移动量为0。');
-      return transact('MOVE_ROUTE_SEGMENT', { routeId: String(routeId), segmentIndex: Number(segmentIndex), delta: amount }, (state) => {
+      const payload = { routeId: String(routeId), segmentIndex: Number(segmentIndex), delta: amount,
+        displacedRouteIds: [] };
+      return transact('MOVE_ROUTE_SEGMENT', payload, (state) => {
+        if (!ROUTER) throw new EditorError('EDIT_ROUTER_MISSING', '自动避让路由内核未加载。');
         const index = state.routes.findIndex((route) => route.id === String(routeId));
         if (index < 0) throw new EditorError('ROUTE_NOT_FOUND', '导线不存在：' + routeId);
-        const route = clone(state.routes[index]); const segment = route.segments[Number(segmentIndex)];
-        if (!segment) throw new EditorError('SEGMENT_NOT_FOUND', '线段不存在。', { routeId, segmentIndex });
-        if (segment.index === 0 || segment.index === route.segments.length - 1) {
-          throw new EditorError('ENDPOINT_SEGMENT_LOCKED', '端子相邻线段锁定；请移动器件或选择中间线段。');
-        }
-        const a = segment.index; const b = a + 1;
-        if (segment.orientation === 'horizontal') { route.points[a].y += amount; route.points[b].y += amount; }
-        else { route.points[a].x += amount; route.points[b].x += amount; }
-        state.routes[index] = route;
+        state.routes[index] = shiftedRouteSegment(state.routes[index], segmentIndex, amount);
+        const routed = ROUTER.rerouteAffected({ devices: state.devices, routes: state.routes,
+          annotations: state.annotations, affectedRouteIds: [], lockedRouteIds: [String(routeId)],
+          options: routerOptions(current, o2) });
+        state.routes = Array.from(routed.routes);
+        payload.displacedRouteIds = Array.from(routed.reroutedRouteIds);
+        payload.routingPasses = routed.passes;
       });
+    }
+    function previewDeviceMove(ids, dx, dy, options) {
+      const o2 = options || {}; const x = snap(finite(dx, 'dx'), o2.grid); const y = snap(finite(dy, 'dy'), o2.grid);
+      const list = Array.from(new Set((Array.isArray(ids) ? ids : [ids]).map(String))).sort(compareText);
+      const targets = new Set(list); const found = new Set();
+      const devices = current.devices.map((device) => {
+        if (!targets.has(device.id)) return device;
+        found.add(device.id); return translateDevice(device, x, y);
+      });
+      const missing = list.filter((id) => !found.has(id));
+      if (missing.length) throw new EditorError('DEVICE_NOT_FOUND', '设备不存在：' + missing.join(', '), { missing });
+      const routes = moveConnectedRoutes(current.routes, targets, x, y);
+      const routeIds = new Set(connectedRouteIds(current.routes, targets));
+      let placementOk = true; let placementError = null;
+      if (ROUTER) {
+        try { ROUTER.assertDevicePlacement(devices, list, current.metadata, routerOptions(current, o2)); }
+        catch (error) { placementOk = false; placementError = { code: error.code || 'PREVIEW_INVALID', message: error.message }; }
+      }
+      return Object.freeze({ ids: Object.freeze(list), dx: x, dy: y, placementOk,
+        placementError: placementError && Object.freeze(placementError),
+        routes: Object.freeze(routes.filter((route) => routeIds.has(route.id)).map((route) => Object.freeze({
+          id: route.id, layer: route.layer, netId: route.netId,
+          points: Object.freeze(route.points.map((point) => Object.freeze({ x: point.x, y: point.y })))
+        }))) });
+    }
+    function previewRouteSegment(routeId, segmentIndex, delta, options) {
+      const amount = snap(finite(delta, 'delta'), options && options.grid);
+      const route = current.routes.find((item) => item.id === String(routeId));
+      if (!route) throw new EditorError('ROUTE_NOT_FOUND', '导线不存在：' + routeId);
+      const shifted = shiftedRouteSegment(route, segmentIndex, amount);
+      return Object.freeze({ id: shifted.id, layer: shifted.layer, netId: shifted.netId,
+        points: Object.freeze(shifted.points.map((point) => Object.freeze({ x: point.x, y: point.y }))) });
     }
     function moveAnnotation(id, dx, dy, options) {
       const o2 = options || {}; const x = snap(finite(dx, 'dx'), o2.grid); const y = snap(finite(dy, 'dy'), o2.grid);
@@ -271,15 +354,42 @@
       const list = arrays[String(kind)] || [];
       return list.find((item) => item.id === String(id)) || null;
     }
+    function connectionsForPort(deviceId, portId) {
+      const device = current.devices.find((item) => item.id === String(deviceId));
+      const port = device && (device.ports || []).find((item) => item.id === String(portId));
+      if (!port) return Object.freeze([]);
+      const result = [];
+      current.routes.forEach((route) => {
+        let opposite = null; let role = '';
+        const sourceMatches = route.source.deviceId === device.id &&
+          (route.source.portId === port.id || (route.source.ref === port.ref &&
+            Math.abs(route.source.x - port.x) < 1e-9 && Math.abs(route.source.y - port.y) < 1e-9));
+        const targetMatches = route.target.deviceId === device.id &&
+          (route.target.portId === port.id || (route.target.ref === port.ref &&
+            Math.abs(route.target.x - port.x) < 1e-9 && Math.abs(route.target.y - port.y) < 1e-9));
+        if (sourceMatches) {
+          opposite = route.target; role = 'SOURCE';
+        } else if (targetMatches) {
+          opposite = route.source; role = 'TARGET';
+        }
+        if (opposite) result.push(Object.freeze({ routeId: route.id, circuitId: route.circuitId,
+          netId: route.netId, netClass: route.netClass, role, oppositeRef: opposite.ref,
+          oppositeDeviceId: opposite.deviceId, oppositePortId: opposite.portId }));
+      });
+      result.sort((a, b) => compareText(a.routeId, b.routeId));
+      return Object.freeze(result);
+    }
     function exportDocument() {
       return Object.freeze({ schema: 'EVSE-EDITABLE-SCHEMATIC-DOCUMENT/1.0', editorVersion: VERSION,
+        routerVersion: ROUTER && ROUTER.VERSION || '',
         revision, generatedGeometryHash: IR.drawingIRHash(initial), currentGeometryHash: IR.drawingIRHash(current),
         drawingIR: current, journal: Object.freeze(journal.slice()) });
     }
 
     return Object.freeze({
       schema: SCHEMA, version: VERSION, snapshot, select, inspect, moveDevices, moveDevice: (id, dx, dy, o2) => moveDevices([id], dx, dy, o2),
-      moveRouteSegment, moveAnnotation, editAnnotationText, undo, redo, reset, subscribe, exportDocument,
+      moveRouteSegment, previewDeviceMove, previewRouteSegment, connectionsForPort,
+      moveAnnotation, editAnnotationText, undo, redo, reset, subscribe, exportDocument,
       get drawingIR() { return current; }, get selection() { return selection; }, get journal() { return Object.freeze(journal.slice()); }
     });
   }

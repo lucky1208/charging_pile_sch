@@ -93,6 +93,16 @@
   .diagram-box.editor-active g[id^="ROUTE-"][data-editor-selected="true"] line,
   .diagram-box.editor-active g[id^="ROUTE-"][data-editor-selected="true"] path{stroke:#008cff!important;stroke-width:3!important}
   .diagram-box.editor-active [data-editor-dragging="true"]{opacity:.72;filter:drop-shadow(0 0 5px #00f0ff)}
+  .diagram-box.editor-active [data-editor-preview-muted="true"]{opacity:.16}
+  .diagram-box.editor-active [data-editor-layer-hidden="true"]{display:none!important}
+  #EVSE-EDITOR-PREVIEW{pointer-events:none}
+  #EVSE-EDITOR-PREVIEW .editor-route-preview{fill:none;stroke:#00a9e8;stroke-width:3;stroke-dasharray:10 5;
+    stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 2px rgba(0,183,255,.55))}
+  #EVSE-EDITOR-PREVIEW[data-invalid="true"] .editor-route-preview{stroke:#f85149}
+  .editor-layer-list{display:grid;grid-template-columns:1fr;gap:4px;margin:7px 0}
+  .editor-layer-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px;
+    border:1px solid #243955;border-radius:5px;background:#101c2d;font-size:10px}
+  .editor-layer-toggle label{display:flex;align-items:center;gap:6px;cursor:pointer;min-width:0}
   .mini-btn:disabled{opacity:.42;cursor:not-allowed}
   .quality-dimensions{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:7px}
   .quality-dimension{border:1px solid #34527c;border-radius:6px;padding:5px;font-size:9px;color:var(--text2)}
@@ -359,10 +369,11 @@
         <div class="diagram-box" id="d-pile"></div>
         <aside class="editor-side" id="editor-inspector">
           <h3>属性 / PIN / 网络</h3>
-          <div id="editor-inspector-content" class="muted">点击器件、导线或图示对象查看属性。可拖动已有器件和已有导线的中间线段；当前不支持新建/删除网络、完整 push-shove 或多页层次化编辑。</div>
+          <div id="editor-layer-controls"></div>
+          <div id="editor-inspector-content" class="muted">点击器件、导线或图示对象查看属性。拖动器件时导线实时跟随，落点后自动避让；拖动中间线段时会挤推重布冲突导线。新增/删除网络仍须先经过 EDEM 电气规则建模。</div>
         </aside>
       </div>
-      <div class="editor-status" id="editor-status">对象化编辑：器件移动和中间线段移动会在提交时重新执行几何检查，以及针对当前生成图已建模端点的 ERC；不合法操作自动回滚。</div>
+      <div class="editor-status" id="editor-status">对象化编辑：拖动实时跟线；落点采用不穿器件的正交自动避让；线段冲突会挤推重布相邻导线。每次提交均重新执行几何/ERC，失败自动回滚。</div>
       <div id="review-host"></div>
     </div>
   </div>
@@ -373,7 +384,7 @@
   本平台输出为方案级自动原理图，不构成标准符合性证明、保护整定书、型式试验结论或设备报价；生产/施工图须由具备相应资格的专业人员校核、深化与签发
 </footer>
 
-<script src="js/engine-bundle.js?v=sha256-8a7d1f9c4f03136f066e5bbc0466b687a341e8d37f84ed02a85a1f4114e53592" data-generated-bundle-hash="sha256-8a7d1f9c4f03136f066e5bbc0466b687a341e8d37f84ed02a85a1f4114e53592"></script>
-<script src="js/app.js?v=sha256-343102c3ceeecd1107993e0dd244cbe6cc83bcfdab915c310c116af95bda6043" data-generated-app-hash="sha256-343102c3ceeecd1107993e0dd244cbe6cc83bcfdab915c310c116af95bda6043"></script>
+<script src="js/engine-bundle.js?v=sha256-927a913317a7278037cde2cfde3366a38b7cd0699bd7e4be6e84f3e3159f8d5b" data-generated-bundle-hash="sha256-927a913317a7278037cde2cfde3366a38b7cd0699bd7e4be6e84f3e3159f8d5b"></script>
+<script src="js/app.js?v=sha256-d37bf132641a72b55027b1515f3416d31ff10083f85525d51435d83f891d0a7b" data-generated-app-hash="sha256-d37bf132641a72b55027b1515f3416d31ff10083f85525d51435d83f891d0a7b"></script>
 </body>
 </html>
