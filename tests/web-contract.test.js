@@ -65,11 +65,27 @@ test('Web 提供真实项目参考矩阵并明确区分可见走线和待复核�
 test('Web 编辑器提供实时跟线、自动避让、挤推、图层和键盘事务入口', () => {
   assert.match(html, /EVSE-EDITOR-PREVIEW/);
   assert.match(html, /挤推重布相邻导线/);
-  assert.match(app, /previewDeviceMove/);
+  assert.match(app, /previewObjectMove/);
   assert.match(app, /previewRouteSegment/);
   assert.match(app, /connectionsForPort/);
   assert.match(app, /data-editor-layer/);
   assert.match(app, /event\.ctrlKey \|\| event\.metaKey/);
   assert.match(app, /window\.editorUndo\(\)/);
   assert.match(app, /cancelEditorDrag/);
+});
+
+test('Web 编辑器提供 CAD 框选、多选、原子组移、网格微调与对齐分布入口', () => {
+  assert.match(html, /id="editor-snap"/);
+  assert.match(html, /id="editor-grid"/);
+  assert.match(html, /id="editor-selection-count"/);
+  assert.match(html, /EVSE-EDITOR-MARQUEE/);
+  assert.match(app, /state\.editor\.selectMany/);
+  assert.match(app, /state\.editor\.toggleSelection/);
+  assert.match(app, /state\.editor\.queryRect/);
+  assert.match(app, /state\.editor\.moveObjects/);
+  assert.match(app, /state\.editor\.alignDevices/);
+  assert.match(app, /state\.editor\.distributeDevices/);
+  assert.match(app, /screenDistance < 4/);
+  assert.match(app, /arrowleft/);
+  assert.match(app, /drag\.marqueeMode === 'contained'/);
 });

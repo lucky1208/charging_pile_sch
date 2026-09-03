@@ -17,7 +17,8 @@
     requirement: null, providerStatus: {}, providerStatusLoaded: false,
     requirementKey: '', generating: false, automatedInputSources: {}, initialInputValues: {},
     editor: null, editorEnabled: false, editorDrag: null, editorUnsubscribe: null,
-    editorKeyboardBound: false, hiddenLayers: new Set()
+    editorKeyboardBound: false, hiddenLayers: new Set(),
+    editorGrid: 5, editorSnap: true, editorGridVisible: true
   };
 
   function escapeHtml(value) {
@@ -657,6 +658,25 @@
     host.style.borderColor = error ? '#8a3a3a' : '#29466f';
     host.style.color = error ? '#ff9b9b' : '#b7d5f4';
   }
+  function editorCommandOptions() {
+    return { grid: state.editorSnap ? state.editorGrid : 0 };
+  }
+  function syncEditorGridStyle() {
+    const box = $('d-pile'); const svg = getSvg(); if (!box || !svg) return;
+    const pixels = Math.max(4, Number(state.editorGrid || 5) * Number(state.zoom || 1));
+    svg.style.setProperty('--editor-grid-px', pixels + 'px');
+    if (state.editorGridVisible) box.removeAttribute('data-editor-grid-hidden');
+    else box.setAttribute('data-editor-grid-hidden', 'true');
+  }
+  window.editorUpdateGridPrefs = function () {
+    const grid = Number($('editor-grid') && $('editor-grid').value);
+    state.editorGrid = Number.isFinite(grid) && grid > 0 ? grid : 5;
+    state.editorSnap = !!($('editor-snap') && $('editor-snap').checked);
+    state.editorGridVisible = !!($('editor-grid-visible') && $('editor-grid-visible').checked);
+    syncEditorGridStyle();
+    setEditorStatus('编辑网格 ' + state.editorGrid + ' 图纸单位 · ' + (state.editorSnap ? '吸附开启' : '自由移动') +
+      ' · ' + (state.editorGridVisible ? '网格可见' : '网格隐藏') + '。');
+  };
   function updateEditorControls() {
     const snapshot = state.editor && state.editor.snapshot();
     if ($('editor-undo')) $('editor-undo').disabled = !snapshot || !snapshot.canUndo;
@@ -666,6 +686,8 @@
     if (toggle) toggle.textContent = state.editorEnabled ? '✎ 退出编辑' : '✎ 在线编辑';
     const workspace = $('editor-workspace');
     if (workspace) workspace.textContent = document.body.classList.contains('workspace-mode') ? '⤢ 返回参数' : '⛶ 全屏工作台';
+    const count = state.editor ? state.editor.selections.length : 0;
+    if ($('editor-selection-count')) $('editor-selection-count').textContent = '已选 ' + count;
   }
   function setEditorEnabled(enabled) {
     state.editorEnabled = !!enabled && !!state.editor;
@@ -673,8 +695,9 @@
     if (shell) shell.classList.toggle('active', state.editorEnabled);
     if (box) box.classList.toggle('editor-active', state.editorEnabled);
     if (svg) svg.classList.toggle('editor-active', state.editorEnabled);
+    syncEditorGridStyle();
     updateEditorControls();
-    if (state.editorEnabled) setEditorStatus('已进入对象化编辑：器件拖动实时跟线，落点自动正交避让；中间线段可挤推相邻导线；Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Y 重做，Esc 取消。每次提交都会重新运行几何和端点 ERC。');
+    if (state.editorEnabled) setEditorStatus('选择工具：左→右框选完全包含对象，右→左框选相交对象；Shift/Ctrl 多选；拖动已选器件可成组跟线，方向键按网格微调。每次提交都会重新运行几何和端点 ERC。');
   }
   window.toggleEditor = function () { setEditorEnabled(!state.editorEnabled); };
   window.toggleEditorWorkspace = function () {
@@ -730,34 +753,65 @@
   function nearestEditableSegment(route, point) {
     const candidates = (route && route.segments || []).filter((segment) =>
       segment.index > 0 && segment.index < route.segments.length - 1);
-    return candidates.sort((a, b) => distanceToSegment(point, a) - distanceToSegment(point, b))[0] || null;
+    const best = candidates.sort((a, b) => distanceToSegment(point, a) - distanceToSegment(point, b))[0] || null;
+    const tolerance = Math.max(4, 8 / Math.max(0.1, Number(state.zoom) || 1));
+    return best && distanceToSegment(point, best) <= tolerance ? best : null;
   }
   function clearEditorHighlight() {
     const box = $('d-pile'); if (!box) return;
     box.querySelectorAll('[data-editor-selected="true"]').forEach((node) => node.removeAttribute('data-editor-selected'));
+    box.querySelectorAll('[data-editor-primary="true"]').forEach((node) => node.removeAttribute('data-editor-primary'));
+  }
+  function editorNodeForSelection(selection) {
+    if (!selection) return null;
+    if (selection.kind === 'device') return document.getElementById('DEVICE-' + selection.id);
+    if (selection.kind === 'route') return document.getElementById('ROUTE-' + selection.id);
+    if (selection.kind === 'annotation') return Array.from(($('d-pile') || document).querySelectorAll('[data-primitive]'))
+      .find((item) => item.getAttribute('data-primitive') === selection.id) || null;
+    return null;
   }
   function highlightEditorSelection() {
     clearEditorHighlight();
-    const selection = state.editor && state.editor.selection; if (!selection) return;
-    let node = null;
-    if (selection.kind === 'device') node = document.getElementById('DEVICE-' + selection.id);
-    if (selection.kind === 'route') node = document.getElementById('ROUTE-' + selection.id);
-    if (selection.kind === 'annotation') node = Array.from(($('d-pile') || document).querySelectorAll('[data-primitive]'))
-      .find((item) => item.getAttribute('data-primitive') === selection.id);
-    if (node) node.setAttribute('data-editor-selected', 'true');
-  }
-  function selectEditorObject(target) {
     if (!state.editor) return;
-    state.editor.select(target ? target.kind : null, target ? target.id : null);
+    state.editor.selections.forEach((item) => {
+      const node = editorNodeForSelection(item); if (node) node.setAttribute('data-editor-selected', 'true');
+    });
+    const primary = editorNodeForSelection(state.editor.selection);
+    if (primary) primary.setAttribute('data-editor-primary', 'true');
+  }
+  function selectEditorObject(target, mode) {
+    if (!state.editor) return;
+    if (!target) state.editor.select(null, null);
+    else if (mode === 'toggle') state.editor.toggleSelection(target.kind, target.id);
+    else if (mode === 'add') state.editor.selectMany([{ kind: target.kind, id: target.id }],
+      { mode: 'add', primary: { kind: target.kind, id: target.id } });
+    else state.editor.select(target.kind, target.id);
     highlightEditorSelection(); renderEditorInspector();
   }
 
   function renderEditorInspector() {
     const host = $('editor-inspector-content');
     if (!host || !state.editor) return;
-    const selected = state.editor.selection;
+    const selected = state.editor.selection; const selectedItems = state.editor.selections;
     if (!selected) {
-      host.innerHTML = '<div class="muted">点击器件、导线或图示对象查看属性。拖动器件时所有已接导线实时跟随并在落点自动避让；拖动导线中间线段会挤推重布冲突导线。</div>';
+      host.innerHTML = '<div class="muted">点击、Shift/Ctrl 多选，或在空白处框选对象。左→右只选完全包含对象，右→左选择相交对象。拖动已选器件/图示可原子成组移动。</div>';
+      return;
+    }
+    if (selectedItems.length > 1) {
+      const devices = selectedItems.filter((entry) => entry.kind === 'device');
+      const routes = selectedItems.filter((entry) => entry.kind === 'route');
+      const annotations = selectedItems.filter((entry) => entry.kind === 'annotation');
+      host.innerHTML = '<div class="inspector-row"><span>多选</span><b>' + selectedItems.length + ' 个对象</b></div>' +
+        '<div class="inspector-row"><span>构成</span><span>器件 ' + devices.length + ' · 导线 ' + routes.length + ' · 图示/文字 ' + annotations.length + '</span></div>' +
+        (devices.length >= 2 ? '<div class="muted" style="margin-top:8px">以橙色主选器件为基准对齐；对齐/分布均为一次事务，失败整组回滚。</div>' +
+          '<div class="editor-command-grid"><button class="mini-btn" onclick="editorAlignSelected(\'left\')">左对齐</button>' +
+          '<button class="mini-btn" onclick="editorAlignSelected(\'centerX\')">水平居中</button><button class="mini-btn" onclick="editorAlignSelected(\'right\')">右对齐</button>' +
+          '<button class="mini-btn" onclick="editorAlignSelected(\'top\')">顶对齐</button><button class="mini-btn" onclick="editorAlignSelected(\'centerY\')">垂直居中</button>' +
+          '<button class="mini-btn" onclick="editorAlignSelected(\'bottom\')">底对齐</button></div>' : '') +
+        (devices.length >= 3 ? '<div class="editor-command-grid" style="grid-template-columns:1fr 1fr"><button class="mini-btn" onclick="editorDistributeSelected(\'horizontal\')">水平等距</button>' +
+          '<button class="mini-btn" onclick="editorDistributeSelected(\'vertical\')">垂直等距</button></div>' : '') +
+        '<details open><summary>所选对象</summary><div class="inspector-pins">' + selectedItems.slice(0, 80).map((entry) =>
+          '<div class="editor-object"><b>' + escapeHtml(entry.kind) + '</b> · ' + escapeHtml(entry.id) + '</div>').join('') + '</div></details>';
       return;
     }
     const item = state.editor.inspect(selected.kind, selected.id);
@@ -807,7 +861,18 @@
     const x = Number($('editor-x').value); const y = Number($('editor-y').value);
     const oldX = item.bbox.xMin != null ? item.bbox.xMin : item.bbox.x;
     const oldY = item.bbox.yMin != null ? item.bbox.yMin : item.bbox.y;
-    applyEditorCommand(state.editor.moveDevice(item.id, x - oldX, y - oldY, { grid: 5 }));
+    applyEditorCommand(state.editor.moveDevice(item.id, x - oldX, y - oldY, editorCommandOptions()));
+  };
+  window.editorAlignSelected = function (mode) {
+    if (!state.editor) return;
+    const ids = state.editor.selections.filter((entry) => entry.kind === 'device').map((entry) => entry.id);
+    const primary = state.editor.selection && state.editor.selection.kind === 'device' ? state.editor.selection.id : ids[0];
+    applyEditorCommand(state.editor.alignDevices(ids, mode, { anchorId: primary, grid: 0 }));
+  };
+  window.editorDistributeSelected = function (axis) {
+    if (!state.editor) return;
+    const ids = state.editor.selections.filter((entry) => entry.kind === 'device').map((entry) => entry.id);
+    applyEditorCommand(state.editor.distributeDevices(ids, axis, { grid: 0 }));
   };
   window.editorApplyAnnotationText = function () {
     const selection = state.editor && state.editor.selection;
@@ -846,18 +911,47 @@
     });
     svg.appendChild(group);
   }
-  function restoreDraggedNode(drag) {
-    if (!drag || !drag.target || !drag.target.node) return;
-    drag.target.node.removeAttribute('data-editor-dragging');
-    if (drag.originalTransform) drag.target.node.setAttribute('transform', drag.originalTransform);
-    else drag.target.node.removeAttribute('transform');
+  function clearEditorMarquee() {
+    const svg = getSvg(); const group = svg && svg.querySelector('#EVSE-EDITOR-MARQUEE');
+    if (group) group.remove();
+  }
+  function renderEditorMarquee(drag) {
+    const svg = getSvg(); if (!svg) return;
+    clearEditorMarquee();
+    const current = drag.current || drag.start; const namespace = 'http://www.w3.org/2000/svg';
+    const group = document.createElementNS(namespace, 'g'); const box = document.createElementNS(namespace, 'rect');
+    drag.marqueeMode = current.x >= drag.start.x ? 'contained' : 'intersect';
+    group.setAttribute('id', 'EVSE-EDITOR-MARQUEE'); group.setAttribute('data-mode', drag.marqueeMode);
+    box.setAttribute('x', Math.min(drag.start.x, current.x)); box.setAttribute('y', Math.min(drag.start.y, current.y));
+    box.setAttribute('width', Math.abs(current.x - drag.start.x)); box.setAttribute('height', Math.abs(current.y - drag.start.y));
+    group.appendChild(box); svg.appendChild(group);
+  }
+  function restoreDraggedNodes(drag) {
+    ((drag && drag.nodes) || []).forEach((entry) => {
+      entry.node.removeAttribute('data-editor-dragging');
+      if (entry.transform) entry.node.setAttribute('transform', entry.transform); else entry.node.removeAttribute('transform');
+    });
   }
   function cancelEditorDrag(message) {
     const drag = state.editorDrag; if (!drag) return false;
-    state.editorDrag = null; restoreDraggedNode(drag); clearEditorPreview(drag);
+    state.editorDrag = null; restoreDraggedNodes(drag); clearEditorPreview(drag); clearEditorMarquee();
     highlightEditorSelection();
     setEditorStatus(message || '已取消本次拖动，图纸未发生变化。');
     return true;
+  }
+  function selectionIsHidden(item) {
+    const value = state.editor && state.editor.inspect(item.kind, item.id);
+    const layer = value && (value.layer || (item.kind === 'device' ? 'EVSE-EQPT' : ''));
+    return !!(layer && state.hiddenLayers.has(layer));
+  }
+  function movableEditorSelections() {
+    return (state.editor ? state.editor.selections : []).filter((item) =>
+      ['device', 'annotation'].includes(item.kind) && !selectionIsHidden(item));
+  }
+  function nudgeEditorSelection(dx, dy) {
+    const items = movableEditorSelections();
+    if (!items.length) { setEditorStatus('当前选择中没有可移动的器件或图示对象。', true); return; }
+    applyEditorCommand(state.editor.moveObjects(items, dx, dy, { grid: 0 }));
   }
   function bindEditorKeyboard() {
     if (state.editorKeyboardBound) return;
@@ -871,56 +965,92 @@
         if (!cancelEditorDrag()) selectEditorObject(null);
         event.preventDefault(); return;
       }
-      if (typing || !(event.ctrlKey || event.metaKey)) return;
+      if (typing) return;
       const key = String(event.key || '').toLowerCase();
-      if (key === 'z' && !event.shiftKey) { event.preventDefault(); window.editorUndo(); }
-      else if (key === 'y' || (key === 'z' && event.shiftKey)) { event.preventDefault(); window.editorRedo(); }
+      if (event.ctrlKey || event.metaKey) {
+        if (key === 'z' && !event.shiftKey) { event.preventDefault(); window.editorUndo(); }
+        else if (key === 'y' || (key === 'z' && event.shiftKey)) { event.preventDefault(); window.editorRedo(); }
+        else if (key === 'a') {
+          event.preventDefault();
+          const items = state.editor.drawingIR.devices.map((item) => ({ kind: 'device', id: item.id }))
+            .concat(state.editor.drawingIR.annotations.map((item) => ({ kind: 'annotation', id: item.id })))
+            .filter((item) => !selectionIsHidden(item));
+          state.editor.selectMany(items, { mode: 'replace', primary: items[items.length - 1] });
+          highlightEditorSelection(); renderEditorInspector(); updateEditorControls();
+          setEditorStatus('已选择当前可见的 ' + items.length + ' 个器件与图示对象；导线保持可单击检查。');
+        }
+        return;
+      }
+      if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+        event.preventDefault(); const base = state.editorSnap ? state.editorGrid : 1; const step = event.shiftKey ? base * 5 : base;
+        if (key === 'arrowleft') nudgeEditorSelection(-step, 0);
+        if (key === 'arrowright') nudgeEditorSelection(step, 0);
+        if (key === 'arrowup') nudgeEditorSelection(0, -step);
+        if (key === 'arrowdown') nudgeEditorSelection(0, step);
+      }
     });
   }
 
   function bindEditorEvents() {
     const svg = getSvg(); if (!svg || !state.editor) return;
     svg.classList.toggle('editor-active', state.editorEnabled);
-    svg.addEventListener('click', (event) => {
-      if (!state.editorEnabled || state.editorDrag) return;
-      const target = editorTarget(event.target);
-      if (target) { event.preventDefault(); event.stopPropagation(); }
-      selectEditorObject(target);
-    });
     svg.addEventListener('pointerdown', (event) => {
       if (!state.editorEnabled || event.button !== 0) return;
-      const target = editorTarget(event.target); if (!target) return;
-      const start = svgPoint(svg, event); let segment = null;
-      if (target.kind === 'route') segment = nearestEditableSegment(state.editor.inspect('route', target.id), start);
-      if (target.kind === 'route' && !segment) { selectEditorObject(target); setEditorStatus('该导线没有可拖动的中间线段；端子邻接段保持锁定。', true); return; }
-      selectEditorObject(target);
-      state.editorDrag = { pointerId: event.pointerId, target, start, current: start, segment,
-        originalTransform: target.node.getAttribute('transform') || '', previewMutedNodes: [] };
-      target.node.setAttribute('data-editor-dragging', 'true');
+      const target = editorTarget(event.target); const start = svgPoint(svg, event);
+      const modifierMode = event.ctrlKey || event.metaKey ? 'toggle' : event.shiftKey ? 'add' : 'replace';
+      if (target && modifierMode !== 'replace') {
+        selectEditorObject(target, modifierMode); event.preventDefault(); event.stopPropagation(); return;
+      }
+      if (!target) {
+        state.editorDrag = { kind: 'marquee', pointerId: event.pointerId, start, current: start,
+          clientStart: { x: event.clientX, y: event.clientY }, clientCurrent: { x: event.clientX, y: event.clientY },
+          selectionMode: modifierMode, active: false, nodes: [], previewMutedNodes: [] };
+      } else {
+        const selected = state.editor.selections.some((item) => item.kind === target.kind && item.id === target.id);
+        if (!selected) selectEditorObject(target);
+        let segment = null;
+        if (target.kind === 'route') segment = nearestEditableSegment(state.editor.inspect('route', target.id), start);
+        if (target.kind === 'route' && !segment) {
+          setEditorStatus('导线已选中；该导线没有可拖动的中间线段，端子邻接段保持锁定。');
+          event.preventDefault(); event.stopPropagation(); return;
+        }
+        const items = target.kind === 'route' ? [{ kind: 'route', id: target.id }] : movableEditorSelections();
+        const nodes = items.map((item) => ({ item, node: editorNodeForSelection(item) })).filter((entry) => entry.node)
+          .map((entry) => Object.assign(entry, { transform: entry.node.getAttribute('transform') || '' }));
+        state.editorDrag = { kind: target.kind === 'route' ? 'route-segment' : 'move-selection', pointerId: event.pointerId,
+          target, items, nodes, start, current: start, clientStart: { x: event.clientX, y: event.clientY },
+          clientCurrent: { x: event.clientX, y: event.clientY }, segment, active: false, previewMutedNodes: [] };
+        nodes.forEach((entry) => entry.node.setAttribute('data-editor-dragging', 'true'));
+      }
       if (svg.setPointerCapture) svg.setPointerCapture(event.pointerId);
       event.preventDefault(); event.stopPropagation();
     });
     svg.addEventListener('pointermove', (event) => {
       const drag = state.editorDrag; if (!drag || drag.pointerId !== event.pointerId) return;
-      drag.current = svgPoint(svg, event);
+      drag.current = svgPoint(svg, event); drag.clientCurrent = { x: event.clientX, y: event.clientY };
+      const screenDistance = Math.hypot(drag.clientCurrent.x - drag.clientStart.x, drag.clientCurrent.y - drag.clientStart.y);
+      if (!drag.active && screenDistance < 4) return;
+      drag.active = true;
       const dx = drag.current.x - drag.start.x; const dy = drag.current.y - drag.start.y;
-      if (drag.target.kind === 'device') {
+      if (drag.kind === 'marquee') {
+        renderEditorMarquee(drag);
+        setEditorStatus((drag.current.x >= drag.start.x ? '窗口框选：仅选择完全包含对象' : '交叉框选：选择所有相交对象') + '；松开完成选择。');
+      } else if (drag.kind === 'move-selection') {
         try {
-          const preview = state.editor.previewDeviceMove(drag.target.id, dx, dy, { grid: 5 });
-          drag.target.node.setAttribute('transform', (drag.originalTransform ? drag.originalTransform + ' ' : '') +
-            'translate(' + preview.dx + ' ' + preview.dy + ')');
+          const preview = state.editor.previewObjectMove(drag.items, dx, dy, editorCommandOptions());
+          drag.nodes.forEach((entry) => entry.node.setAttribute('transform', (entry.transform ? entry.transform + ' ' : '') +
+            'translate(' + preview.dx + ' ' + preview.dy + ')'));
           renderEditorRoutePreview(preview.routes, !preview.placementOk, drag);
-          setEditorStatus((preview.placementOk ? '跟线预览' : '⛔ 落点无效') + ' · ' + preview.routes.length +
-            ' 条端子导线同步移动；松开后自动避让并执行 ERC。', !preview.placementOk);
+          setEditorStatus((preview.placementOk ? '成组跟线预览' : '⛔ 成组落点无效') + ' · ' + preview.items.length +
+            ' 个对象 · ' + preview.routes.length + ' 条端子导线同步移动；松开后单事务避让/ERC。', !preview.placementOk);
         } catch (error) { setEditorStatus('预览失败：' + humanError(error), true); }
-      } else if (drag.target.kind === 'annotation') {
-        drag.target.node.setAttribute('transform', (drag.originalTransform ? drag.originalTransform + ' ' : '') + 'translate(' + dx + ' ' + dy + ')');
       } else {
         const delta = drag.segment.orientation === 'horizontal' ? dy : dx;
         try {
-          const preview = state.editor.previewRouteSegment(drag.target.id, drag.segment.index, delta, { grid: 5 });
+          const preview = state.editor.previewRouteSegment(drag.target.id, drag.segment.index, delta, editorCommandOptions());
           renderEditorRoutePreview([preview], false, drag);
-          setEditorStatus('导线 ' + drag.target.id + ' · S' + drag.segment.index + ' 预移动 ' + Math.round(delta / 5) * 5 +
+          const snapped = state.editorSnap ? Math.round(delta / state.editorGrid) * state.editorGrid : delta;
+          setEditorStatus('导线 ' + drag.target.id + ' · S' + drag.segment.index + ' 预移动 ' + Number(snapped.toFixed(2)) +
             '；松开后挤推重布冲突导线并执行 ERC。');
         } catch (error) { setEditorStatus('预览失败：' + humanError(error), true); }
       }
@@ -929,17 +1059,29 @@
     const finish = (event) => {
       const drag = state.editorDrag; if (!drag || drag.pointerId !== event.pointerId) return;
       state.editorDrag = null;
-      restoreDraggedNode(drag); clearEditorPreview(drag);
+      restoreDraggedNodes(drag); clearEditorPreview(drag); clearEditorMarquee();
       if (event.type === 'pointercancel') {
         highlightEditorSelection(); setEditorStatus('指针操作已取消，图纸未发生变化。'); return;
       }
       const current = drag.current || drag.start; const dx = current.x - drag.start.x; const dy = current.y - drag.start.y;
+      if (!drag.active) {
+        if (drag.kind === 'marquee' && drag.selectionMode === 'replace') selectEditorObject(null);
+        highlightEditorSelection(); renderEditorInspector(); updateEditorControls(); return;
+      }
+      if (drag.kind === 'marquee') {
+        const bounds = { x: Math.min(drag.start.x, current.x), y: Math.min(drag.start.y, current.y),
+          width: Math.abs(current.x - drag.start.x), height: Math.abs(current.y - drag.start.y) };
+        const matches = state.editor.queryRect(bounds, { mode: drag.marqueeMode }).filter((item) => !selectionIsHidden(item));
+        state.editor.selectMany(matches, { mode: drag.selectionMode, primary: matches[matches.length - 1] });
+        highlightEditorSelection(); renderEditorInspector(); updateEditorControls();
+        setEditorStatus((drag.marqueeMode === 'contained' ? '窗口框选' : '交叉框选') + '完成：命中 ' + matches.length +
+          ' 个可见对象，当前共选择 ' + state.editor.selections.length + ' 个。');
+        event.preventDefault(); return;
+      }
       let response;
-      if (Math.hypot(dx, dy) < 1.5) { highlightEditorSelection(); return; }
-      if (drag.target.kind === 'device') response = state.editor.moveDevice(drag.target.id, dx, dy, { grid: 5 });
-      else if (drag.target.kind === 'annotation') response = state.editor.moveAnnotation(drag.target.id, dx, dy, { grid: 5 });
+      if (drag.kind === 'move-selection') response = state.editor.moveObjects(drag.items, dx, dy, editorCommandOptions());
       else response = state.editor.moveRouteSegment(drag.target.id, drag.segment.index,
-        drag.segment.orientation === 'horizontal' ? dy : dx, { grid: 5 });
+        drag.segment.orientation === 'horizontal' ? dy : dx, editorCommandOptions());
       applyEditorCommand(response);
       event.preventDefault();
     };
@@ -1013,6 +1155,7 @@
     svg.style.height = (baseHeight * state.zoom) + 'px';
     const label = $('zoom-label');
     if (label) label.textContent = state.zoomMode === 'fit-width' ? '适宽' : state.zoomMode === 'fit-sheet' ? '适页' : Math.round(state.zoom * 100) + '%';
+    syncEditorGridStyle();
   }
   window.zoomIn = function () { state.zoomMode = 'manual'; state.zoom = Math.min(4, state.zoom * 1.2); applyZoom(); };
   window.zoomOut = function () { state.zoomMode = 'manual'; state.zoom = Math.max(0.25, state.zoom / 1.2); applyZoom(); };
