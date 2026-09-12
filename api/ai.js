@@ -8,6 +8,8 @@
  * ============================================================ */
 'use strict';
 
+const crypto = require('node:crypto');
+
 const WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 20;
 const MAX_RATE_KEYS = 2000;
@@ -16,6 +18,7 @@ const MAX_TEXT_CHARS = 6000;
 const MAX_UPSTREAM_BYTES = 128 * 1024;
 const MAX_MODEL_CONTENT_CHARS = 16000;
 const UPSTREAM_TIMEOUT_MS = 20 * 1000;
+const MIN_ACCESS_TOKEN_BYTES = 32;
 const requestWindows = new Map();
 
 const PROVIDERS = Object.freeze({
@@ -59,6 +62,32 @@ function sameOrigin(req) {
   } catch (_) {
     return false;
   }
+}
+
+function configuredAccessToken() {
+  const token = typeof process.env.ENGINEERING_API_ACCESS_TOKEN === 'string'
+    ? process.env.ENGINEERING_API_ACCESS_TOKEN.trim() : '';
+  return Buffer.byteLength(token, 'utf8') >= MIN_ACCESS_TOKEN_BYTES ? token : '';
+}
+
+function suppliedAccessToken(req) {
+  const headers = req.headers || {};
+  const authorization = firstHeader(headers.authorization);
+  const bearer = authorization.match(/^Bearer[ \t]+([^\s]+)$/i);
+  const bearerToken = bearer ? bearer[1] : '';
+  const explicitToken = firstHeader(headers['x-engineering-access-token']);
+  if (bearerToken && explicitToken && bearerToken !== explicitToken) return '';
+  return bearerToken || explicitToken;
+}
+
+function accessAllowed(req) {
+  const configured = configuredAccessToken();
+  if (!configured) return { ok: false, configured: false };
+  const supplied = suppliedAccessToken(req);
+  const left = crypto.createHash('sha256').update(supplied, 'utf8').digest();
+  const right = crypto.createHash('sha256').update(configured, 'utf8').digest();
+  return { ok: !!supplied && Buffer.byteLength(supplied, 'utf8') === Buffer.byteLength(configured, 'utf8') &&
+    crypto.timingSafeEqual(left, right), configured: true };
 }
 
 function pruneRateWindows(now) {
@@ -324,15 +353,23 @@ module.exports = async function handler(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
 
-  if (!sameOrigin(req)) return send(res, 403, { ok: false, error: '仅允许同源请求。' });
   if (req.method === 'GET' && req.query && req.query.action === 'status') {
+    if (!sameOrigin(req)) return send(res, 403, { ok: false, error: '仅允许同源请求。' });
     const providers = Object.fromEntries(Object.entries(PROVIDERS).map(([name, cfg]) => [name, Boolean(process.env[cfg.key])]));
-    return send(res, 200, { ok: true, providers });
+    return send(res, 200, { ok: true, providers, authenticationRequired: true,
+      accessControlConfigured: Boolean(configuredAccessToken()) });
   }
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
     return send(res, 405, { ok: false, error: '仅支持 POST 请求或 GET 状态查询。' });
   }
+  const access = accessAllowed(req);
+  if (!access.configured) return send(res, 503, { ok: false, error: 'AI 访问控制尚未由站点管理员配置。' });
+  if (!access.ok) {
+    res.setHeader('WWW-Authenticate', 'Bearer realm="engineering-ai"');
+    return send(res, 401, { ok: false, error: '缺少或提供了无效的受控 AI 访问令牌。' });
+  }
+  if (!sameOrigin(req)) return send(res, 403, { ok: false, error: '浏览器请求必须来自同源页面。' });
   const mediaType = firstHeader(req.headers && req.headers['content-type']).split(';')[0].trim().toLowerCase();
   if (mediaType !== 'application/json') return send(res, 415, { ok: false, error: '请求必须使用 application/json。' });
   if (declaredBodyTooLarge(req)) return send(res, 413, { ok: false, error: '请求内容过大。' });

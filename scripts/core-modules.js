@@ -20,7 +20,9 @@ function stageFor(filename) {
   if (name === 'board-circuit-library.js') return 44;
   if (/device-catalog|catalog|library/.test(name)) return 45;
   if (/design-model|netlist|topology|compiler/.test(name)) return 50;
+  if (name === 'loop-integrity.js') return 54;
   if (/\berc\b|validation/.test(name)) return 55;
+  if (name === 'rendered-svg-audit.js') return 59;
   if (/drawing-skill|rule|audit/.test(name)) return 60;
   if (/vendor/.test(name)) return 65;
   if (name === 'engine.js') return 70;

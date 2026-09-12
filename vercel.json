@@ -4,7 +4,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "web",
   "functions": {
-    "api/ai.js": { "maxDuration": 30 }
+    "api/ai.js": { "maxDuration": 30 },
+    "api/engineering.js": { "maxDuration": 60 }
   },
   "cleanUrls": true,
   "trailingSlash": false,

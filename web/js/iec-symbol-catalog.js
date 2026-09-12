@@ -19,7 +19,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.2.0';
+  const VERSION = '1.4.0';
   const SCHEMA = 'evse-iec-symbol-catalog/v1';
   const FALLBACK_SYMBOL_ID = 'evse.function-block.generic';
 
@@ -90,9 +90,21 @@
     , 'vehicle-diode-detector': 'evse.control-pilot.diode-detector'
     , 'output-precheck-monitor': 'evse.safety.output-precheck'
     , 'contactor-state-monitor': 'evse.safety.contactor-state-monitor'
+    , 'off-page-connector-incoming': 'iec.connector.off-page-incoming'
+    , 'off-page-connector-outgoing': 'iec.connector.off-page-outgoing'
   });
 
+  /* Off-page connectors are graphical projection objects, never EDEM
+     equipment classes. Keeping the sets explicit prevents a renderer aid
+     from accidentally being promoted into the authoritative device model. */
+  const GRAPHICAL_PROJECTION_KINDS = Object.freeze([
+    'off-page-connector-incoming',
+    'off-page-connector-outgoing'
+  ]);
+  const GRAPHICAL_PROJECTION_KIND_SET = new Set(GRAPHICAL_PROJECTION_KINDS);
   const CURRENT_DEVICE_KINDS = Object.freeze(Object.keys(KIND_TO_SYMBOL).sort());
+  const CONTROLLED_DEVICE_KINDS = Object.freeze(CURRENT_DEVICE_KINDS.filter((kind) =>
+    !GRAPHICAL_PROJECTION_KIND_SET.has(kind)));
 
   function definition(id, family, title, iecReferences, functionCode) {
     return Object.freeze({
@@ -171,12 +183,42 @@
     'evse.control-pilot.diode-detector': definition('evse.control-pilot.diode-detector', 'elementary', 'Vehicle-side diode presence detector', [], 'DIODE'),
     'evse.safety.output-precheck': definition('evse.safety.output-precheck', 'elementary', 'Pre-energization output circuit diagnostic', [], 'PRECHECK'),
     'evse.safety.contactor-state-monitor': definition('evse.safety.contactor-state-monitor', 'elementary', 'Contactor downstream voltage / weld monitor', [], 'WELD'),
+    'iec.connector.off-page-incoming': definition('iec.connector.off-page-incoming', 'elementary', 'Incoming off-page circuit references', ['IEC-61082-1'], '←PAGE'),
+    'iec.connector.off-page-outgoing': definition('iec.connector.off-page-outgoing', 'elementary', 'Outgoing off-page circuit references', ['IEC-61082-1'], 'PAGE→'),
     'evse.function-block.generic': definition('evse.function-block.generic', 'function-block', 'Generic controlled function', [], 'FUNC')
   });
 
   function finite(value, fallback) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
+  }
+
+  function isWideCharacter(character) {
+    const code = character.codePointAt(0);
+    return code >= 0x1100 && (
+      code <= 0x115f || code === 0x2329 || code === 0x232a ||
+      (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
+      (code >= 0xac00 && code <= 0xd7a3) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0xfe10 && code <= 0xfe19) ||
+      (code >= 0xfe30 && code <= 0xfe6f) ||
+      (code >= 0xff00 && code <= 0xff60) ||
+      (code >= 0xffe0 && code <= 0xffe6) ||
+      (code >= 0x1f300 && code <= 0x1faff) ||
+      (code >= 0x20000 && code <= 0x3fffd)
+    );
+  }
+
+  function estimatedTextWidth(value, height) {
+    const size = Math.max(0, finite(height, 0));
+    return Array.from(String(value == null ? '' : value)).reduce((sum, character) => {
+      if (/\s/u.test(character)) return sum + size * 0.35;
+      return sum + size * (isWideCharacter(character) ? 1 : 0.58);
+    }, 0);
+  }
+
+  function offPageMarkerSpan(innerWidth) {
+    return Math.max(15, Math.min(28, finite(innerWidth, 0) * 0.23));
   }
 
   function normalizeBbox(value) {
@@ -353,6 +395,7 @@
 
   function drawSwitch(builder, variant) {
     const b = builder;
+    if (variant === 'contactor') return drawContactor(b);
     const result = b.inlineRows((row) => {
       const contactOffset = Math.max(2.4, Math.min(4.2, (row.bodyRight - row.bodyLeft) * 0.14));
       b.circle(row.bodyLeft + contactOffset, row.y, 1.15, 'fixed-contact', { fill: 'paper', strokeWidth: 1 });
@@ -370,29 +413,86 @@
         strokeWidth: 0.65, dash: '3,2'
       });
     }
-    if (variant === 'contactor') {
-      const coilY = b.bottom - Math.max(4, b.h * 0.1);
-      b.rect(b.cx - 7, coilY - 2.8, 14, 5.6, 'contactor-coil', { strokeWidth: 1 });
-      b.text(b.cx, coilY + 1.4, 'A1  A2', 'coil-label', { height: 8 });
-      const feedbackPorts = b.ports.filter((port) => /FEEDBACK/i.test(String(port.terminalId || port.id || '')));
-      if (feedbackPorts.length) {
-        const auxY = b.top + Math.max(5, b.h * 0.1);
-        const auxLeft = b.cx - 7;
-        const auxRight = b.cx + 7;
-        b.circle(auxLeft, auxY, 1.1, 'auxiliary-fixed-contact', { fill: 'paper', strokeWidth: 0.9 });
-        b.circle(auxRight, auxY, 1.1, 'auxiliary-fixed-contact', { fill: 'paper', strokeWidth: 0.9 });
-        b.line(auxLeft + 1, auxY - 0.2, auxRight - 1, auxY - 3.5,
-          'auxiliary-moving-contact', { strokeWidth: 1.05 });
-        b.line(b.cx, auxY + 2, b.cx, coilY - 3,
-          'mechanical-linkage', { strokeWidth: 0.65, dash: '3,2' });
-        feedbackPorts.forEach((port) => b.lead(port,
-          port.x <= b.cx ? auxLeft : auxRight, auxY, 'feedback-contact-lead'));
+  }
+
+  /* A contactor's main contacts, coil and feedback may be projected onto
+     different functional sheets.  Render only terminals present in this
+     appearance: never invent A1/A2, a second feedback pin, or a suppressor. */
+  function drawContactor(builder) {
+    const b = builder;
+    const name = (port) => String(port.terminalId || port.id || '');
+    const coils = b.uniquePorts((port) => /^COIL_/i.test(name(port)));
+    const feedback = b.uniquePorts((port) => /FEEDBACK/i.test(name(port)));
+    const main = b.uniquePorts((port) => isPowerPort(port) && !/^COIL_/i.test(name(port)));
+    const levels = [];
+
+    function contact(first, second, role) {
+      if (!first || !second) return;
+      const firstY = finite(first.y, b.cy);
+      const secondY = finite(second.y, b.cy);
+      const horizontal = Math.abs(firstY - secondY) < 1e-6;
+      if (horizontal) {
+        const left = b.cx - 12;
+        const right = b.cx + 12;
+        b.ports.filter((port) => name(port) === name(first)).forEach((port) =>
+          b.lead(port, left, firstY, role + '-lead'));
+        b.ports.filter((port) => name(port) === name(second)).forEach((port) =>
+          b.lead(port, right, secondY, role + '-lead'));
+        b.circle(left, firstY, 1.15, role + '-fixed', { fill: 'paper' });
+        b.circle(right, firstY, 1.15, role + '-fixed', { fill: 'paper' });
+        b.line(left + 1, firstY - 0.3, right - 1, firstY - 6, role, { strokeWidth: 1.45 });
+      } else {
+        const top = Math.min(firstY, secondY);
+        const bottom = Math.max(firstY, secondY);
+        b.ports.filter((port) => name(port) === name(first)).forEach((port) =>
+          b.lead(port, b.cx, firstY, role + '-lead'));
+        b.ports.filter((port) => name(port) === name(second)).forEach((port) =>
+          b.lead(port, b.cx, secondY, role + '-lead'));
+        b.circle(b.cx, top, 1.15, role + '-fixed', { fill: 'paper' });
+        b.circle(b.cx, bottom, 1.15, role + '-fixed', { fill: 'paper' });
+        b.line(b.cx, top + 1, b.cx + 6, bottom - 1, role, { strokeWidth: 1.45 });
       }
-      b.ports.filter((port) => !isPowerPort(port) && !/FEEDBACK/i.test(String(port.terminalId || port.id || ''))).forEach((port) => {
-        const isLeft = String(port.side || '').toUpperCase() === 'LEFT' || port.x <= b.cx;
-        b.lead(port, isLeft ? b.cx - 7 : b.cx + 7, coilY, 'coil-lead');
-      });
+      levels.push((firstY + secondY) / 2);
     }
+
+    const inputs = main.filter((port) => /^IN_/i.test(name(port)));
+    inputs.forEach((port) => contact(port,
+      main.find((candidate) => name(candidate) === name(port).replace(/^IN_/i, 'OUT_')),
+      'moving-contact'));
+    if (!inputs.length) contact(main.find((port) => name(port) === 'IN'),
+      main.find((port) => name(port) === 'OUT'), 'moving-contact');
+
+    contact(feedback.find((port) => /_IN$/i.test(name(port))) || feedback[0],
+      feedback.find((port) => /_OUT$/i.test(name(port))) || feedback[1],
+      'auxiliary-moving-contact');
+    if (feedback.length === 1) {
+      const port = feedback[0];
+      const y = finite(port.y, b.cy);
+      b.rect(b.cx - 10, y - 6, 20, 12, 'feedback-interface', { fill: 'paper' });
+      b.text(b.cx, y + 2, 'FB', 'feedback-interface-label', { height: 8 });
+      b.ports.filter((candidate) => name(candidate) === name(port)).forEach((candidate) =>
+        b.lead(candidate, candidate.x <= b.cx ? b.cx - 10 : b.cx + 10, y, 'feedback-interface-lead'));
+      levels.push(y);
+    }
+
+    if (coils.length) {
+      const positive = coils.find((port) => port.polarity === 'POSITIVE' || !/_0V$/i.test(name(port))) || coils[0];
+      const negative = coils.find((port) => port !== positive);
+      const y = negative ? (positive.y + negative.y) / 2 : positive.y;
+      const half = Math.min(7, negative ? Math.max(2, Math.abs(positive.y - negative.y) / 4) : 7);
+      b.rect(b.cx - 10, y - half, 20, half * 2, 'contactor-coil', { strokeWidth: 1.1, fill: 'paper' });
+      const lead = (port, end) => {
+        if (!port) return;
+        b.ports.filter((candidate) => name(candidate) === name(port)).forEach((candidate) =>
+          b.polyline([{ x: candidate.x, y: candidate.y }, { x: b.cx, y: candidate.y },
+            { x: b.cx, y: end }], 'coil-lead'));
+      };
+      lead(positive, y - half);
+      lead(negative, y + half);
+      levels.push(y);
+    }
+    if (levels.length > 1) b.line(b.cx + 8, Math.min(...levels), b.cx + 8, Math.max(...levels),
+      'mechanical-linkage', { strokeWidth: 0.65, dash: '3,2' });
   }
 
   function drawFuse(builder) {
@@ -774,6 +874,70 @@
     });
   }
 
+  /* IEC 61082-style continuation references are deliberately drawn as
+     arrow rows rather than a generic equipment rectangle.  A bank is only
+     a graphical packing device: every row remains one independently
+     selectable circuit/terminal and carries its own page reference label. */
+  function drawOffPageConnector(builder, incoming) {
+    const b = builder;
+    b.uniquePorts().forEach((port) => {
+      const terminalId = String(port.terminalId || port.id || '');
+      const connectorRowId = String(port.offPageConnectorId ||
+        [port.circuitId, terminalId].filter(Boolean).join(':'));
+      const trace = {
+        connectorRowId,
+        offPageConnectorId: String(port.offPageConnectorId || ''),
+        terminalId,
+        circuitId: String(port.circuitId || ''),
+        netId: String(port.netId || ''),
+        netClass: String(port.netClass || '')
+      };
+      const onLeft = String(port.side || '').toUpperCase() === 'LEFT' || port.x <= b.cx;
+      const inward = onLeft ? 1 : -1;
+      const span = offPageMarkerSpan(b.w);
+      const baseX = port.x + inward * span;
+      const tipX = incoming ? baseX : port.x + inward * (span * 0.78);
+      const tailX = incoming ? port.x : baseX;
+      b.line(tailX, port.y, tipX, port.y, incoming ? 'off-page-incoming-lead' : 'off-page-outgoing-lead',
+        Object.assign({ strokeWidth: 1.25 }, trace));
+      const direction = Math.sign(tipX - tailX) || inward;
+      b.polyline([
+        { x: tipX, y: port.y },
+        { x: tipX - direction * 5.5, y: port.y - 3.5 },
+        { x: tipX - direction * 5.5, y: port.y + 3.5 }
+      ], incoming ? 'off-page-incoming-arrow' : 'off-page-outgoing-arrow',
+      Object.assign({ fill: 'paper', strokeWidth: 1.15 }, trace), true);
+      b.circle(port.x, port.y, 1.25, 'off-page-terminal',
+        Object.assign({ fill: 'paper', strokeWidth: 0.9 }, trace));
+
+      /* The continuation glyph owns the complete span between the terminal
+         and arrow.  Put the exact remote PIN label beyond that reserved area;
+         the generic 3.2-unit terminal-label inset would draw directly over
+         the triangle and lead.  Labels may shrink only to the documented
+         8-unit readability floor and remain on their original circuit row. */
+      const clearance = 4.5;
+      const labelX = port.x + inward * (span + clearance);
+      const label = String(port.label || port.terminalId || '');
+      const availableWidth = Math.max(1, onLeft
+        ? b.box.xMax - 3.2 - labelX
+        : labelX - (b.box.xMin + 3.2));
+      const unitWidth = Math.max(1e-9, estimatedTextWidth(label, 1));
+      /* Dense continuation banks use a controlled 8..8.5-unit label.  This
+         keeps adjacent exact-PIN rows clear at the 12-unit placement pitch
+         without making the whole functional sheet taller or less routable. */
+      const labelHeight = Math.max(8, Math.min(8.5, availableWidth / unitWidth));
+      b.add('text', {
+        x: labelX,
+        y: port.y - labelHeight * 0.17,
+        text: label,
+        height: labelHeight,
+        anchor: onLeft ? 'start' : 'end',
+        weight: 'normal',
+        rotation: 0
+      }, 'terminal-label', Object.assign({ strokeWidth: 0, fill: 'ink' }, trace));
+    });
+  }
+
   function drawSafety(builder) {
     const b = builder;
     const power = b.ports.filter(isPowerPort);
@@ -1102,6 +1266,8 @@
       case 'iec.connector.ev-charge': drawConnector(builder); break;
       case 'iec.connector.ev-charge-ac':
       case 'iec.connector.ev-charge-dc-inlet': drawConnector(builder); break;
+      case 'iec.connector.off-page-incoming': drawOffPageConnector(builder, true); break;
+      case 'iec.connector.off-page-outgoing': drawOffPageConnector(builder, false); break;
       case 'iec.connector.split-interface': drawTerminalBlock(builder); break;
       case 'iec.switch.safety': drawSafety(builder); break;
       case 'iec.switch.safety-four-pole': drawSwitch(builder, 'isolator'); break;
@@ -1152,10 +1318,15 @@
       ? Object.freeze({ kind: String(value.kind || ''), symbolId: String(value.symbolId), fallback: String(value.symbolId) === FALLBACK_SYMBOL_ID,
         definition: get(value.symbolId) })
       : resolve(value.kind);
+    const offPageProjection = GRAPHICAL_PROJECTION_KIND_SET.has(resolved.kind) ||
+      /^iec\.connector\.off-page-/.test(resolved.symbolId);
     const builder = primitiveBuilder(value, resolved.definition);
-    builder.title();
+    /* A connector bank is not equipment.  Each selectable row already owns
+       its direction/page/PIN reference, so a generic bank title would only
+       duplicate information and collide with the first row. */
+    if (!offPageProjection) builder.title();
     drawForDefinition(builder, resolved.definition);
-    builder.portLabels();
+    if (!offPageProjection) builder.portLabels();
     return Object.freeze({
       schema: SCHEMA,
       version: VERSION,
@@ -1181,6 +1352,8 @@
     SCHEMA,
     FALLBACK_SYMBOL_ID,
     CURRENT_DEVICE_KINDS,
+    CONTROLLED_DEVICE_KINDS,
+    GRAPHICAL_PROJECTION_KINDS,
     KIND_TO_SYMBOL,
     DEFINITIONS,
     resolve,

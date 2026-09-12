@@ -3,13 +3,15 @@
  * 输入 → 受控需求翻译（可选）→ 确定性选型引擎 → 自动出图
  *
  * 安全边界：浏览器从不接收或保存模型 API Key；可选 AI 请求只发往
- * 同源 /api/ai 代理，且只用于自然语言参数翻译。
+ * 同源服务。需求翻译、审图观察和资料检索都不能修改 EDEM、坐标、
+ * 批准状态或发布闸门。
  * ============================================================ */
 (function () {
   'use strict';
 
   const $ = (id) => document.getElementById(id);
   const AI_API = '/api/ai';
+  const ENGINEERING_API = '/api/engineering';
   const DRAWING_KEY = 'ev-schematic';
   const REQUIREMENTS = window.EVSE_REQUIREMENT_SPEC;
   const state = {
@@ -18,7 +20,14 @@
     requirementKey: '', generating: false, automatedInputSources: {}, initialInputValues: {},
     editor: null, editorEnabled: false, editorDrag: null, editorUnsubscribe: null,
     editorKeyboardBound: false, hiddenLayers: new Set(),
-    editorGrid: 5, editorSnap: true, editorGridVisible: true
+    editorGrid: 5, editorSnap: true, editorGridVisible: true,
+    viewportBound: false, viewportSpaceDown: false, viewportPan: null,
+    engineeringStatus: { configured: false }, engineeringBom: null,
+    bomResearchCandidates: [], engineeringReviewCandidate: null,
+    schematicDocument: null, renderedSchematicDocument: null,
+    activeSheetId: null, activePage: null, activePageGate: null,
+    pageEdits: Object.create(null), pageEditorSessions: Object.create(null), systemDrawing: null,
+    engineeringAccessToken: ''
   };
 
   function escapeHtml(value) {
@@ -47,6 +56,17 @@
     return message || '请求未完成';
   }
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  function engineeringAccessToken() {
+    const input = $('f-ai-access-token');
+    const value = String(input ? input.value : state.engineeringAccessToken || '').trim();
+    state.engineeringAccessToken = value;
+    return value;
+  }
+  function authenticatedJsonHeaders() {
+    const token = engineeringAccessToken();
+    if (!token) throw new Error('请先输入站点管理员分配的受控 AI 访问令牌。');
+    return { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: 'Bearer ' + token };
+  }
 
   /* ---------- 表单 ---------- */
   const TRACKED_FIELDS = ['f-name', 'f-site', 'f-standard', 'f-archetype', 'f-output', 'f-module', 'f-guns',
@@ -122,7 +142,9 @@
     if (model === 'local') { target.textContent = '本地规则解析：自然语言不会发送到服务端。'; return; }
     if (!state.providerStatusLoaded) { target.textContent = '正在检查同源服务端 AI 配置；不可用时将自动使用本地规则。'; return; }
     target.textContent = providerEnabled(model)
-      ? '对应 AI 已由服务端配置。仅发送自然语言用于参数翻译，选型与出图仍由确定性引擎完成。'
+      ? (engineeringAccessToken()
+        ? '对应 AI 已由服务端配置。仅发送自然语言用于参数翻译，选型与出图仍由确定性引擎完成。'
+        : '对应 AI 已配置，但公网模型调用需要上方的受控 AI 访问令牌；未填写时自动退回本地规则。')
       : '对应 AI 尚未在服务端配置；生成时会自动退回本地规则解析。浏览器不需要也不能填写 API Key。';
   }
   async function loadProviderStatus() {
@@ -142,7 +164,7 @@
   async function requestAI(action, payload) {
     const response = await fetch(AI_API, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: authenticatedJsonHeaders(),
       body: JSON.stringify(Object.assign({ action }, payload || {}))
     });
     let body = null;
@@ -298,7 +320,7 @@
         '按进线电流选取开关、接触器、快熔与电缆档位',
         '按储能容量确定电池簇配置、预充与变换器',
         '建立命名端口工程模型并执行 sch_lib 绘图规则校验',
-        '渲染 A3 充电桩电气原理图与设备明细表'
+        '编译六类功能图纸、精确跨页续接与工程 BOM'
       ];
       for (let index = 0; index < steps.length; index += 1) {
         const line = logStep('[' + (index + 1) + '/' + steps.length + '] ' + steps[index], 'running');
@@ -316,9 +338,15 @@
       renderDesignStatus();
       renderFunctionalUnitStatus();
       renderQualityStatus();
-      initializeSchematicEditor();
+      prepareEngineeringBom();
+      renderEngineeringBom();
+      prepareSchematicDocument();
+      renderSheetTabs();
       $('empty-hint').style.display = 'none';
-      $('result-area').style.display = 'block';
+      $('result-area').style.display = 'flex';
+      if (state.renderedSchematicDocument && state.activeSheetId) activateSchematicSheet(state.activeSheetId);
+      renderQualityStatus();
+      initializeSchematicEditor();
       logStep('✅ 已生成确定性充电桩原理图。', 'ok');
       $('result-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) {
@@ -333,6 +361,9 @@
   function renderDrawing() {
     const target = $('d-pile');
     const skill = window.EVSE_DRAWING_SKILL;
+    state.activePage = null;
+    state.activePageGate = null;
+    state.systemDrawing = null;
     try {
       const markup = typeof window.drawPile === 'function'
         ? window.drawPile(state.R)
@@ -354,6 +385,18 @@
       }
     }
     if (skill && typeof skill.finalizeDrawingAudits === 'function') skill.finalizeDrawingAudits(state.R);
+    if (state.R && state.R.drawingIR && /^<svg\b/.test(String(state.svg || ''))) {
+      state.systemDrawing = {
+        svg: state.svg,
+        drawingIR: state.R.drawingIR,
+        drawingCompiled: state.R.drawingCompiled,
+        drawingPlan: state.R.drawingPlan,
+        drawingSheet: state.R.drawingSheet,
+        drawingGeometryHash: state.R.drawingGeometryHash,
+        drawingDocumentControl: state.R.drawingDocumentControl,
+        schematicQuality: state.R.schematicQuality
+      };
+    }
     stampAudit();
     applyZoom();
   }
@@ -362,17 +405,22 @@
     const svg = $('d-pile') && $('d-pile').querySelector('svg');
     const report = state.R && state.R.drawingSkill;
     if (!skill || !svg || !report) return;
-    const audit = (report.drawingAudits || {})[DRAWING_KEY];
+    const audit = state.activePageGate || (report.drawingAudits || {})[DRAWING_KEY];
     const meta = typeof skill.metadata === 'function' ? skill.metadata(state.R, DRAWING_KEY) : {};
-    svg.setAttribute('data-drawing-audit-status', (audit && audit.status) || 'BLOCKED');
-    svg.setAttribute('data-drawing-skill-status', report.status || 'BLOCKED');
+    const auditStatus = (audit && audit.status) || 'BLOCKED';
+    svg.setAttribute('data-drawing-audit-status', auditStatus);
+    svg.setAttribute('data-drawing-skill-status', state.activePage ? auditStatus : (report.status || 'BLOCKED'));
     svg.setAttribute('data-evaluated-rules', (meta.evaluatedRuleIds || []).join(','));
     const metadataNode = svg.querySelector('metadata');
     if (!metadataNode) return;
     try {
       const documentMeta = JSON.parse(metadataNode.textContent || '{}');
       documentMeta.drawingSkill = Object.assign({}, documentMeta.drawingSkill || {}, meta, {
-        status: report.status || 'BLOCKED', auditStatus: (audit && audit.status) || 'BLOCKED', auditVersion: skill.VERSION || ''
+        status: state.activePage ? auditStatus : (report.status || 'BLOCKED'),
+        auditStatus, auditVersion: skill.VERSION || '',
+        sheetId: state.activeSheetId || '',
+        projectGateStatus: state.schematicDocument && state.schematicDocument.projectGate &&
+          state.schematicDocument.projectGate.status || ''
       });
       metadataNode.textContent = JSON.stringify(documentMeta);
     } catch (_) { svg.setAttribute('data-metadata-sync-status', 'BLOCKED'); }
@@ -494,14 +542,323 @@
         escapeHtml(item.score == null ? '未评估' : item.score + '/100 · ' + item.status) + '</div>';
     }).join('');
     const failures = (quality.checks || []).filter((item) => !item.ok && item.result !== 'NOT_ASSESSED');
+    const pageGate = state.activePageGate;
+    const pageQuality = pageGate && pageGate.quality;
+    const pageFailures = pageQuality && (pageQuality.checks || []).filter((item) => !item.ok) || [];
     host.innerHTML = '<div class="state-box" style="margin-top:8px"><b>图纸质量画像：</b>' +
       '<span style="color:' + (quality.status === 'PASS' ? '#78d8a4' : '#e3b341') + '">' + escapeHtml(quality.status) + '</span>' +
       ' · 阻断 ' + Number(quality.blockingCount || 0) + ' · 未决 ' + Number(quality.unresolvedCount || 0) +
       (failures.length ? '<br><b>需处理：</b>' + failures.slice(0, 6).map((item) =>
         escapeHtml(item.ruleId + ' ' + item.detail)).join('；') : '') +
       '<div class="quality-dimensions">' + dimensions + '</div>' +
+      (pageGate ? '<div style="margin-top:8px;padding-top:7px;border-top:1px solid #29466f"><b>当前页 ' +
+        escapeHtml(state.activeSheetId || '') + '：</b><span style="color:' +
+        (pageGate.status === 'PASS' ? '#78d8a4' : pageGate.status === 'REVIEW_REQUIRED' ? '#e3b341' : '#f85149') + '">' +
+        escapeHtml(pageGate.status) + '</span> · 精确回路 ' +
+        Number(pageGate.coverage && pageGate.coverage.renderedCircuitCount || 0) + '/' +
+        Number(pageGate.coverage && pageGate.coverage.expectedCircuitCount || 0) + ' · 跨页续接 ' +
+        Number(pageGate.coverage && pageGate.coverage.renderedOffPageConnectorCount || 0) + '/' +
+        Number(pageGate.coverage && pageGate.coverage.expectedOffPageConnectorCount || 0) +
+        (pageFailures.length ? '<br><b>页面需处理：</b>' + pageFailures.slice(0, 5).map((item) =>
+          escapeHtml(item.code + ' ' + item.detail)).join('；') : '') + '</div>' : '') +
       '<div style="margin-top:6px;color:var(--text2)">' + escapeHtml(quality.note || '') + '</div></div>';
   }
+
+  /* ---------- EDEM 同源工程 BOM ---------- */
+  function prepareEngineeringBom() {
+    const api = window.SCHEMATIC_ENGINEERING_BOM;
+    if (!api || typeof api.build !== 'function' || !state.R) {
+      state.engineeringBom = null;
+      return;
+    }
+    state.engineeringBom = api.build(state.R, { approvedSelections: state.approvedBomSelections || [] });
+  }
+
+  function safeHttpsHref(value) {
+    try {
+      const url = new URL(String(value || ''));
+      return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+    } catch (_) { return ''; }
+  }
+
+  function renderEngineeringBom() {
+    const body = $('bom-table-body');
+    const status = $('bom-status');
+    if (!body) return;
+    const bom = state.engineeringBom;
+    if (!bom || !Array.isArray(bom.rows)) {
+      body.innerHTML = '<tr><td colspan="9">工程 BOM 模块未加载或尚未生成方案。</td></tr>';
+      if (status) status.textContent = '不可用';
+      return;
+    }
+    body.innerHTML = bom.rows.map((row, index) => {
+      const trace = bom.trace && bom.trace[index] || {};
+      const url = safeHttpsHref(row['说明手册下载']);
+      const selected = trace.selectionStatus === 'APPROVED';
+      return '<tr data-instance-id="' + escapeHtml(trace.instanceId || '') + '">' +
+        '<td><b>' + escapeHtml(row['位号']) + '</b></td>' +
+        '<td>' + escapeHtml(row['类别']) + '</td>' +
+        '<td>' + escapeHtml(row['设备名称']) + '</td>' +
+        '<td class="' + (selected ? '' : 'pending') + '">' + escapeHtml(row['型号']) + '</td>' +
+        '<td class="' + (selected ? '' : 'pending') + '">' + escapeHtml(row['参考推荐厂家']) + '</td>' +
+        '<td>' + escapeHtml(row['关键参数']) + '</td>' +
+        '<td>' + escapeHtml(row['数量']) + '</td>' +
+        '<td>' + (url && selected ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">打开厂家数据手册</a>' :
+          '<span class="pending">待检索 / 待批准</span>') + '</td>' +
+        '<td><span class="state-tag ' + (selected ? 'calc' : 'warn') + '">' + escapeHtml(trace.selectionStatus || 'PART_SELECTION_REQUIRED') + '</span></td></tr>';
+    }).join('');
+    const unresolved = (bom.trace || []).filter((item) => item.selectionStatus !== 'APPROVED').length;
+    if (status) status.textContent = '实例覆盖 ' + bom.coverage.bomRowCount + '/' + bom.coverage.designInstanceCount +
+      ' · 待选型 ' + unresolved + ' · ' + (bom.coverage.ok ? 'COVERAGE PASS' : 'BLOCKED');
+  }
+
+  window.downloadEngineeringBomCsv = function () {
+    const delivery = window.SCHEMATIC_ENGINEERING_DELIVERY || window.EVSE_ENGINEERING_DELIVERY;
+    if (!delivery || !state.engineeringBom) { alert('当前没有可导出的工程 BOM。'); return; }
+    const csv = delivery.bomCsv(state.engineeringBom);
+    downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), drawingName() + '_BOM.csv');
+  };
+
+  window.downloadExactPinWiringCsv = function () {
+    const delivery = window.SCHEMATIC_ENGINEERING_DELIVERY || window.EVSE_ENGINEERING_DELIVERY;
+    if (!delivery || !state.R) { alert('当前没有可导出的权威 EDEM 接线数据。'); return; }
+    try {
+      const csv = delivery.wiringCsv(state.R);
+      downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), drawingName() + '_WIRING.csv');
+    } catch (error) { alert('精确 PIN 接线表导出失败：' + humanError(error)); }
+  };
+
+  window.downloadEngineeringRfqCsv = function () {
+    const delivery = window.SCHEMATIC_ENGINEERING_DELIVERY || window.EVSE_ENGINEERING_DELIVERY;
+    if (!delivery || !state.R) { alert('当前没有可导出的 RFQ 澄清数据。'); return; }
+    try {
+      const csv = delivery.rfqCsv(state.R);
+      downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), drawingName() + '_RFQ.csv');
+    } catch (error) { alert('RFQ 澄清表导出失败：' + humanError(error)); }
+  };
+
+  window.downloadEngineeringAuditJson = function () {
+    const delivery = window.SCHEMATIC_ENGINEERING_DELIVERY || window.EVSE_ENGINEERING_DELIVERY;
+    if (!delivery || !state.R) { alert('当前没有可导出的审计证据。'); return; }
+    let auditedDocument = state.renderedSchematicDocument;
+    try {
+      if (state.activePage && state.schematicDocument) {
+        const pageApi = window.EVSE_SCHEMATIC_SHEET_RENDERING || window.SCHEMATIC_FORGE_SHEET_RENDERING;
+        const markup = exportSvgMarkup(getSvg());
+        const replacement = Object.assign({}, state.activePage, { svg: markup });
+        auditedDocument = pageApi.evaluateDocument(state.R, state.renderedSchematicDocument,
+          { [state.activeSheetId]: replacement });
+      }
+      const json = delivery.auditJson(state.R, auditedDocument);
+      downloadBlob(new Blob([json], { type: 'application/json;charset=utf-8' }), drawingName() + '_AUDIT.json');
+    } catch (error) { alert('审计证据导出失败：' + humanError(error)); }
+  };
+
+  function renderBomCandidates(candidates, note) {
+    const host = $('bom-candidate-output');
+    if (!host) return;
+    host.style.display = 'block';
+    const list = Array.isArray(candidates) ? candidates : [];
+    host.innerHTML = '<div class="candidate-banner"><b>在线研究候选，不是采购推荐</b> · 任何型号、厂家和链接必须经工程师复核并显式批准，才可进入主 BOM。</div>' +
+      (note ? '<div style="margin-bottom:7px">' + escapeHtml(note) + '</div>' : '') +
+      (list.length ? list.map((item) => {
+        const url = safeHttpsHref(item.datasheetUrl);
+        return '<div class="editor-object" style="border-color:#29466f;margin-bottom:5px"><b>' +
+          escapeHtml(item.reference || item.instanceId) + '</b> · ' + escapeHtml(item.manufacturer || '厂家待核') + ' ' +
+          escapeHtml(item.model || '型号待核') + ' <span class="state-tag warn">CANDIDATE / UNREVIEWED</span><br>' +
+          (url ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">查看候选数据手册</a>' : '未返回可验证 HTTPS 数据手册链接') +
+          (item.researchNotes ? '<br>' + escapeHtml(item.researchNotes) : '') + '</div>';
+      }).join('') : '<div>没有返回完整候选；主 BOM 保持 PART_SELECTION_REQUIRED。</div>');
+  }
+
+  window.researchBomCandidates = async function () {
+    const button = $('bom-research-button');
+    const api = window.SCHEMATIC_ENGINEERING_BOM;
+    try {
+      if (!state.engineeringBom || !api) throw new Error('请先生成工程 BOM。');
+      const pending = (state.engineeringBom.trace || []).filter((entry) => entry.selectionStatus !== 'APPROVED').slice(0, 12);
+      if (!pending.length) throw new Error('当前没有待检索的 BOM 行。');
+      if (button) { button.disabled = true; button.textContent = '正在检索…'; }
+      const rows = pending.map((trace) => {
+        const row = state.engineeringBom.rows[trace.rowIndex] || {};
+        return { rowId: trace.instanceId, reference: row['位号'], category: row['类别'],
+          deviceName: row['设备名称'], keyParameters: row['关键参数'], quantity: row['数量'] };
+      });
+      const response = await requestEngineering({ action: 'bom-research', bom: rows });
+      const rowById = new Map(pending.map((trace) => [trace.instanceId, trace]));
+      const raw = [];
+      (response.items || []).forEach((group) => (group.candidates || []).forEach((candidate) => {
+        const trace = rowById.get(group.rowId) || {};
+        const row = state.engineeringBom.rows[trace.rowIndex] || {};
+        raw.push(Object.assign({}, candidate, {
+          instanceId: group.rowId,
+          reference: row['位号'],
+          evidence: (candidate.evidenceUrls || []).map((url) => ({
+            url, title: candidate.datasheetTitle || candidate.model, sourceType: candidate.sourceType
+          })),
+          researchNotes: candidate.notes
+        }));
+      }));
+      const candidates = raw.map((item) => {
+        try { return api.normaliseResearchCandidate(item); } catch (_) { return null; }
+      }).filter(Boolean);
+      state.bomResearchCandidates = candidates;
+      renderBomCandidates(candidates, response.note || response.summary || '检索结果已隔离保存为候选。');
+    } catch (error) {
+      renderBomCandidates([], '检索未完成：' + humanError(error) + '。主 BOM 没有发生变化。');
+    } finally {
+      if (button) button.textContent = '🌐 检索缺失数据手册';
+      updateEngineeringAccessState();
+    }
+  };
+
+  /* ---------- 多 Sheet 图册（EDEM 不因分页、图形分段或编辑而截断） ---------- */
+  function pageRenderOptions(page) {
+    const sheet = page && page.sheet || {};
+    return {
+      title: sheet.title || '充电桩电气原理图',
+      subtitle: (sheet.drawingNo || sheet.id || '') + ' | ' + (sheet.purpose || '') + ' | 图形投影·非权威 EDEM',
+      sheetId: sheet.id || page && page.sheetId || '', drawingNo: sheet.drawingNo || '',
+      pageCurrent: Number(sheet.page || 1), pageTotal: Number(sheet.total || 1),
+      sourceModelHash: state.R && state.R.design && state.R.design.modelHash || '',
+      includeSchedule: false, includeLegend: true,
+      offPageConnectors: page && page.offPageConnectors || sheet.offPageConnectors || [],
+      projectionNote: '本页是全局 EDEM 的受控图形投影；图形分段和跨页续接均以 circuitId/netId/精确 PIN 回指电气真值。'
+    };
+  }
+
+  function pageRecord(sheetId) {
+    const id = String(sheetId || '');
+    if (state.pageEdits && state.pageEdits[id]) return state.pageEdits[id];
+    const pages = state.renderedSchematicDocument && state.renderedSchematicDocument.pages || [];
+    return pages.find((page) => String(page.sheetId) === id) || null;
+  }
+
+  function activateSchematicSheet(sheetId) {
+    const page = pageRecord(sheetId);
+    if (!page || !state.R) return false;
+    const compiled = page.compiled;
+    const ir = compiled && compiled.drawingIR;
+    if (!compiled || !ir || !page.svg) return false;
+    state.activeSheetId = String(page.sheetId);
+    state.activePage = page;
+    state.activePageGate = page.pageGate || null;
+    state.R.drawingCompiled = compiled;
+    state.R.drawingIR = ir;
+    state.R.drawingPlan = compiled.plan;
+    state.R.drawingSheet = compiled.plan && compiled.plan.sheet;
+    state.R.drawingPages = compiled.sheets || [];
+    state.R.drawingGeometryHash = page.geometryHash || (window.EVSE_DRAWING_IR && window.EVSE_DRAWING_IR.drawingIRHash(ir));
+    const sheet = page.sheet || {};
+    const planned = compiled.plan && compiled.plan.sheet || {};
+    state.R.drawingDocumentControl = {
+      source: 'EVSE_SCHEMATIC_SHEET_RENDERING', format: planned.format,
+      orientation: planned.orientation, widthMm: planned.widthMm, heightMm: planned.heightMm,
+      scale: planned.scale, page: { current: Number(sheet.page || 1), total: Number(sheet.total || 1) },
+      sheetId: page.sheetId, drawingNo: sheet.drawingNo || ''
+    };
+    state.R.activeSheet = {
+      sheetId: page.sheetId, drawingNo: sheet.drawingNo || '', title: sheet.title || '',
+      status: state.activePageGate && state.activePageGate.status || 'BLOCKED',
+      projectionHash: page.projectionHash || '', sourceModelHash: page.sourceModelHash || ''
+    };
+    $('d-pile').innerHTML = page.svg;
+    $('d-pile').dataset.drawingRuleStatus = state.activePageGate && state.activePageGate.status || 'BLOCKED';
+    state.svg = page.svg;
+    stampAudit();
+    applyZoom();
+    return true;
+  }
+
+  function prepareSchematicDocument() {
+    state.schematicDocument = null;
+    state.renderedSchematicDocument = null;
+    state.activeSheetId = null;
+    state.activePage = null;
+    state.activePageGate = null;
+    state.pageEdits = Object.create(null);
+    state.pageEditorSessions = Object.create(null);
+    if (!state.R || !state.R.design) return;
+    const renderer = window.EVSE_SCHEMATIC_SHEET_RENDERING || window.SCHEMATIC_FORGE_SHEET_RENDERING;
+    const planner = window.SCHEMATIC_DOCUMENT || window.SCHEMATIC_FORGE_DOCUMENT;
+    try {
+      if (!renderer || typeof renderer.buildDocument !== 'function') {
+        if (!planner || typeof planner.compile !== 'function') throw new Error('多 Sheet 绘图内核未加载。');
+        state.schematicDocument = planner.compile(state.R.design);
+        throw new Error('逐页 Drawing IR 尚未执行；图册保持 fail-closed。');
+      }
+      state.renderedSchematicDocument = renderer.buildDocument(state.R);
+      state.schematicDocument = state.renderedSchematicDocument.document;
+      const pages = state.renderedSchematicDocument.pages || [];
+      state.activeSheetId = pages[0] && pages[0].sheetId || null;
+    } catch (error) {
+      state.renderedSchematicDocument = null;
+      state.schematicDocument = Object.assign({}, state.schematicDocument || { sheets: [] }, {
+        status: 'BLOCKED', error: humanError(error)
+      });
+    }
+  }
+
+  function renderSheetTabs() {
+    const host = $('sheet-tabs');
+    if (!host) return;
+    const doc = state.schematicDocument;
+    const sheets = doc && (doc.sheets || doc.pages) || [];
+    if (!sheets.length) {
+      const sheet = state.R && state.R.drawingSheet || {};
+      host.innerHTML = '<button class="sheet-tab active" type="button" role="tab" aria-selected="true">回退单页 · ' +
+        escapeHtml(sheet.format || 'AUTO') + '</button>' +
+        (doc && doc.error ? '<span class="state-tag warn">多 Sheet 阻断：' + escapeHtml(doc.error) + '</span>' : '');
+      return;
+    }
+    host.innerHTML = sheets.map((sheet, index) => {
+      const id = sheet.id || sheet.sheetId || ('SHEET-' + (index + 1));
+      const title = sheet.title || sheet.name || id;
+      const count = Number((sheet.internalCircuitIds || []).length) + Number((sheet.crossCircuitIds || []).length);
+      const page = pageRecord(id);
+      const status = page && page.pageGate && page.pageGate.status || sheet.gate && sheet.gate.status || 'BLOCKED';
+      return '<button class="sheet-tab ' + (id === state.activeSheetId ? 'active' : '') + '" type="button" role="tab" ' +
+        'aria-selected="' + (id === state.activeSheetId ? 'true' : 'false') + '" ' +
+        'tabindex="' + (id === state.activeSheetId ? '0' : '-1') + '" data-sheet-id="' + escapeHtml(id) + '" ' +
+        'onkeydown="sheetTabKeydown(event)" ' +
+        'data-sheet-status="' + escapeHtml(status) + '" onclick="selectSchematicSheet(\'' + escapeHtml(id) + '\')" ' +
+        'title="' + escapeHtml(status + ' · ' + count + ' 条独立回路 · ' + (sheet.offPageConnectors || []).length + ' 个跨页续接符') + '">' +
+        escapeHtml((sheet.drawingNo || ('SF-' + String(index + 1).padStart(2, '0'))) + ' · ' + title) +
+        ' · ' + count + ' 回路</button>';
+    }).join('') + '<span class="state-tag ' + (String(doc.status) === 'PASS' ? 'calc' : 'warn') + '">' +
+      escapeHtml(doc.status || 'BLOCKED') + ' · ' + sheets.length + ' 页 · 跨页精确回路 ' +
+      Number((doc.crossSheetCircuits || []).length || 0) + '</span>';
+  }
+
+  window.selectSchematicSheet = function (sheetId) {
+    if (!activateSchematicSheet(String(sheetId || ''))) return;
+    renderSheetTabs();
+    initializeSchematicEditor();
+    renderQualityStatus();
+    const page = state.activePage;
+    const sheet = page.sheet || {};
+    const coverage = page.pageGate && page.pageGate.coverage || {};
+    showReview('当前图纸：' + (sheet.drawingNo || sheet.id) + ' · ' + (sheet.title || '') + '\n' +
+      '独立回路：' + Number(coverage.renderedCircuitCount || 0) + '/' + Number(coverage.expectedCircuitCount || 0) + '\n' +
+      '跨页续接：' + Number(coverage.renderedOffPageConnectorCount || 0) + '/' + Number(coverage.expectedOffPageConnectorCount || 0) + '\n' +
+      '页面闸门：' + (page.pageGate && page.pageGate.status || 'BLOCKED') + '\n' +
+      '说明：分页和高扇出图形分段只改变表示；每条导线仍以全局 circuitId、netId 和两端精确 PIN 回指同一 EDEM。');
+  };
+
+  window.sheetTabKeydown = function (event) {
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!event || !keys.includes(event.key)) return;
+    const tabs = Array.from(document.querySelectorAll('#sheet-tabs [role="tab"][data-sheet-id]'));
+    if (!tabs.length) return;
+    const current = Math.max(0, tabs.indexOf(event.currentTarget));
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 :
+      event.key === 'ArrowLeft' ? (current - 1 + tabs.length) % tabs.length : (current + 1) % tabs.length;
+    const target = tabs[index];
+    event.preventDefault();
+    window.selectSchematicSheet(target.getAttribute('data-sheet-id'));
+    const active = document.querySelector('#sheet-tabs [role="tab"][aria-selected="true"]');
+    if (active) active.focus();
+  };
 
   function renderEditorLibrary() {
     const host = $('editor-library-content');
@@ -683,9 +1040,16 @@
     if ($('editor-redo')) $('editor-redo').disabled = !snapshot || !snapshot.canRedo;
     if ($('editor-reset')) $('editor-reset').disabled = !snapshot || snapshot.revision === 0;
     const toggle = $('editor-toggle');
-    if (toggle) toggle.textContent = state.editorEnabled ? '✎ 退出编辑' : '✎ 在线编辑';
+    if (toggle) {
+      toggle.textContent = state.editorEnabled ? '✎ 退出编辑' : '✎ 在线编辑';
+      toggle.setAttribute('aria-pressed', state.editorEnabled ? 'true' : 'false');
+    }
     const workspace = $('editor-workspace');
-    if (workspace) workspace.textContent = document.body.classList.contains('workspace-mode') ? '⤢ 返回参数' : '⛶ 全屏工作台';
+    if (workspace) {
+      const active = document.body.classList.contains('workspace-mode');
+      workspace.textContent = active ? '⤢ 返回参数' : '⛶ 全屏工作台';
+      workspace.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
     const count = state.editor ? state.editor.selections.length : 0;
     if ($('editor-selection-count')) $('editor-selection-count').textContent = '已选 ' + count;
   }
@@ -700,9 +1064,41 @@
     if (state.editorEnabled) setEditorStatus('选择工具：左→右框选完全包含对象，右→左框选相交对象；Shift/Ctrl 多选；拖动已选器件可成组跟线，方向键按网格微调。每次提交都会重新运行几何和端点 ERC。');
   }
   window.toggleEditor = function () { setEditorEnabled(!state.editorEnabled); };
-  window.toggleEditorWorkspace = function () {
-    document.body.classList.toggle('workspace-mode');
+  window.toggleConfigPanel = function () {
+    document.body.classList.toggle('config-collapsed');
+    const collapsed = document.body.classList.contains('config-collapsed');
+    const button = $('config-toggle');
+    if (button) {
+      button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      button.setAttribute('aria-label', collapsed ? '展开上方控制台' : '收起上方控制台');
+      button.textContent = collapsed ? '⌄ 展开上方控制台' : '⌃ 收起上方控制台';
+    }
+    setTimeout(() => { if (/^fit-/.test(state.zoomMode)) applyZoom(); }, 0);
+  };
+  window.toggleInspectorPanels = function () {
+    document.body.classList.toggle('inspector-collapsed');
+    const collapsed = document.body.classList.contains('inspector-collapsed');
+    const button = $('editor-console-toggle');
+    if (button) {
+      button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      button.textContent = collapsed ? '⌄ 展开属性栏' : '⌃ 收起属性栏';
+    }
+    setTimeout(() => { if (/^fit-/.test(state.zoomMode)) applyZoom(); }, 0);
+  };
+  window.toggleEditorWorkspace = async function () {
     if (!state.editorEnabled) setEditorEnabled(true);
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      } else if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else {
+        document.body.classList.toggle('workspace-mode');
+      }
+    } catch (_) {
+      document.body.classList.toggle('workspace-mode');
+    }
+    if (document.fullscreenElement) document.body.classList.add('workspace-mode');
     updateEditorControls();
     setTimeout(() => { applyZoom(); }, 0);
   };
@@ -715,7 +1111,15 @@
       setEditorStatus('编辑内核或 Drawing IR 未加载。', true); updateEditorControls(); return;
     }
     try {
-      state.editor = api.createSession({ drawingIR: state.R.drawingIR, model: state.R.design, historyLimit: 100 });
+      const editingModel = state.activePage && state.activePage.pageModel || state.R.design;
+      const sessionKey = state.activeSheetId || '__SYSTEM__';
+      state.editor = state.pageEditorSessions[sessionKey] ||
+        api.createSession({ drawingIR: state.R.drawingIR, model: editingModel, historyLimit: 100 });
+      state.pageEditorSessions[sessionKey] = state.editor;
+      if (state.editor.drawingIR !== state.R.drawingIR) {
+        state.R.drawingIR = state.editor.drawingIR;
+        state.R.drawingGeometryHash = window.EVSE_DRAWING_IR.drawingIRHash(state.editor.drawingIR);
+      }
       state.editorUnsubscribe = state.editor.subscribe(() => updateEditorControls());
       renderEditorLibrary(); renderEditorLayerControls(); bindEditorEvents(); bindEditorKeyboard(); renderEditorInspector();
       setEditorEnabled(true);
@@ -830,15 +1234,29 @@
           return '<div class="editor-object"><b>' + escapeHtml(port.terminalId || port.id) + '</b> · ' +
             escapeHtml(port.label || '') + '<br>' + escapeHtml(port.ref + ' @ ' + port.x + ',' + port.y) +
             (connections.length ? '<br><span style="color:#78d8a4">' + connections.map((wire) =>
-              escapeHtml(wire.netId + ' · ' + wire.routeId + ' → ' + wire.oppositeRef)).join('<br>') + '</span>' :
+              escapeHtml(wire.netId + ' · ' + wire.routeId + ' → 真实对端 ' + wire.oppositeRef +
+                (wire.graphicalOppositeRef && wire.graphicalOppositeRef !== wire.oppositeRef
+                  ? '（本页图形续接 ' + wire.graphicalOppositeRef + '）' : '') +
+                (wire.remoteDrawingNo ? ' · ' + wire.remoteDrawingNo : ''))).join('<br>') + '</span>' :
               '<br><span style="color:#e3b341">当前图无已建模连接</span>') + '</div>';
         }).join('') + '</div></details>';
     } else if (selected.kind === 'route') {
+      const globalSource = item.globalSource || item.source;
+      const globalTarget = item.globalTarget || item.target;
+      const hasGraphicalProjection = globalSource.ref !== item.source.ref || globalTarget.ref !== item.target.ref;
+      const connector = item.offPageConnector || null;
       host.innerHTML = '<div class="inspector-row"><span>导线ID</span><b>' + escapeHtml(item.id) + '</b></div>' +
         '<div class="inspector-row"><span>网络</span><span>' + escapeHtml(item.netId) + '</span></div>' +
         '<div class="inspector-row"><span>回路</span><span>' + escapeHtml(item.circuitId) + '</span></div>' +
-        '<div class="inspector-row"><span>起点PIN</span><span>' + escapeHtml(item.source.ref) + '</span></div>' +
-        '<div class="inspector-row"><span>终点PIN</span><span>' + escapeHtml(item.target.ref) + '</span></div>' +
+        '<div class="inspector-row"><span>真实起点PIN</span><span>' + escapeHtml(globalSource.ref) + '</span></div>' +
+        '<div class="inspector-row"><span>真实终点PIN</span><span>' + escapeHtml(globalTarget.ref) + '</span></div>' +
+        (hasGraphicalProjection ? '<div class="inspector-row"><span>本页图形端点</span><span>' +
+          escapeHtml(item.source.ref + ' → ' + item.target.ref) + '</span></div>' : '') +
+        (connector ? '<div class="inspector-row"><span>跨页续接</span><span>' +
+          escapeHtml(connector.id + ' → ' + connector.remoteSheetId + ' / ' +
+            (connector.xref && connector.xref.drawingNo || '—') + ' p' +
+            (connector.xref && connector.xref.page || '—') + ' · ' +
+            (connector.xref && connector.xref.endpointKey || '—')) + '</span></div>' : '') +
         '<div class="inspector-row"><span>层</span><span>' + escapeHtml(item.layer) + '</span></div>' +
         '<div class="inspector-row"><span>编辑路由</span><span>正交 · 器件硬避让 · 交叉统一后处理</span></div>' +
         '<details open><summary>正交线段（' + item.segments.length + '）</summary><div class="inspector-pins">' + item.segments.map((segment) =>
@@ -994,6 +1412,21 @@
   function bindEditorEvents() {
     const svg = getSvg(); if (!svg || !state.editor) return;
     svg.classList.toggle('editor-active', state.editorEnabled);
+    svg.querySelectorAll('g[id^="DEVICE-"],g[id^="ROUTE-"]').forEach((node) => {
+      if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '0');
+      if (!node.hasAttribute('role')) node.setAttribute('role', 'button');
+      if (!node.hasAttribute('aria-label')) {
+        const target = editorTarget(node);
+        node.setAttribute('aria-label', target ? (target.kind === 'device' ? '元器件 ' : '导线 ') + target.id : '电气图对象');
+      }
+    });
+    svg.addEventListener('keydown', (event) => {
+      if (!state.editorEnabled || !['Enter', ' '].includes(event.key)) return;
+      const target = editorTarget(event.target);
+      if (!target) return;
+      selectEditorObject(target, event.ctrlKey || event.metaKey ? 'toggle' : event.shiftKey ? 'add' : 'replace');
+      event.preventDefault(); event.stopPropagation();
+    });
     svg.addEventListener('pointerdown', (event) => {
       if (!state.editorEnabled || event.button !== 0) return;
       const target = editorTarget(event.target); const start = svgPoint(svg, event);
@@ -1093,14 +1526,47 @@
     if (!state.editor || !state.R) return;
     const renderer = window.EVSE_SVG_IR_RENDERER; const skill = window.EVSE_DRAWING_SKILL;
     const ir = state.editor.drawingIR;
-    const compiled = Object.assign({}, state.R.drawingCompiled || {}, { drawingIR: ir });
+    const basePage = state.activePage;
+    const compiled = Object.assign({}, basePage && basePage.compiled || state.R.drawingCompiled || {}, { drawingIR: ir });
     state.R.drawingCompiled = compiled; state.R.drawingIR = ir;
     state.R.drawingGeometryHash = window.EVSE_DRAWING_IR.drawingIRHash(ir);
     state.R.editableDocument = state.editor.exportDocument();
-    state.R.schematicQuality = window.EVSE_SCHEMATIC_QUALITY.reviewSystem({ design: state.R.design, drawingIR: ir });
-    const markup = renderer.render(compiled, state.R);
+    state.R.editableDocuments = state.R.editableDocuments || {};
+    if (state.activeSheetId) state.R.editableDocuments[state.activeSheetId] = state.R.editableDocument;
+    else state.R.schematicQuality = window.EVSE_SCHEMATIC_QUALITY.reviewSystem({ design: state.R.design, drawingIR: ir });
+    const markup = renderer.render(compiled, state.R, basePage ? pageRenderOptions(basePage) : undefined);
     $('d-pile').innerHTML = markup; state.svg = markup;
-    if (skill && typeof skill.auditMarkup === 'function') {
+    if (basePage) {
+      const pageApi = window.EVSE_SCHEMATIC_SHEET_RENDERING || window.SCHEMATIC_FORGE_SHEET_RENDERING;
+      const pageGate = pageApi && typeof pageApi.evaluatePage === 'function'
+        ? pageApi.evaluatePage(state.R, state.schematicDocument, state.activeSheetId, compiled, markup)
+        : { status: 'BLOCKED', allowed: false, quality: { checks: [] }, coverage: {} };
+      const edited = Object.assign({}, basePage, {
+        compiled, svg: markup, pageGate,
+        geometryHash: state.R.drawingGeometryHash,
+        editableDocument: state.R.editableDocument
+      });
+      state.pageEdits[state.activeSheetId] = edited;
+      if (pageApi && typeof pageApi.evaluateDocument === 'function' && state.renderedSchematicDocument) {
+        const reevaluated = pageApi.evaluateDocument(state.R, state.renderedSchematicDocument, state.pageEdits);
+        state.renderedSchematicDocument = reevaluated;
+        state.schematicDocument = reevaluated.document;
+        const evaluatedPage = reevaluated.pages.find((item) => item.sheetId === state.activeSheetId) || edited;
+        state.pageEdits[state.activeSheetId] = evaluatedPage;
+        state.activePage = evaluatedPage;
+        state.activePageGate = evaluatedPage.pageGate;
+      } else {
+        state.activePage = edited;
+        state.activePageGate = pageGate;
+        state.schematicDocument = Object.assign({}, state.schematicDocument || {}, {
+          status: 'BLOCKED', projectGate: { status: 'BLOCKED', allowed: false,
+            blockedSheetIds: [state.activeSheetId], code: 'PROJECT_REEVALUATION_NOT_AVAILABLE' }
+        });
+      }
+      if (state.R.activeSheet) state.R.activeSheet.status = state.activePageGate.status;
+      $('d-pile').dataset.drawingRuleStatus = state.activePageGate.status;
+      renderSheetTabs();
+    } else if (skill && typeof skill.auditMarkup === 'function') {
       const audit = skill.auditMarkup(markup, DRAWING_KEY, state.R);
       skill.recordDrawingAudit(state.R, DRAWING_KEY, audit);
       $('d-pile').dataset.drawingRuleStatus = audit.status;
@@ -1128,7 +1594,7 @@
   window.editorRedo = function () { if (state.editor) applyEditorCommand(state.editor.redo()); };
   window.editorReset = function () { if (state.editor) applyEditorCommand(state.editor.reset()); };
 
-  /* ---------- 缩放 ---------- */
+  /* ---------- 工程画布缩放与平移（视图操作不修改 Drawing IR） ---------- */
   function getSvg() {
     const box = $('d-pile');
     return box && box.querySelector('svg');
@@ -1143,25 +1609,97 @@
     }
     const baseWidth = Number(svg.dataset.bw), baseHeight = Number(svg.dataset.bh);
     const host = svg.parentElement;
-    const availableWidth = Math.max(320, Number((host && host.clientWidth) || baseWidth) - 18);
+    const availableWidth = Math.max(80, Number((host && host.clientWidth) || baseWidth) - 20);
     if (state.zoomMode === 'fit-width') {
-      state.zoom = Math.max(0.25, Math.min(1.5, availableWidth / baseWidth));
+      state.zoom = Math.max(0.02, Math.min(2, availableWidth / baseWidth));
     } else if (state.zoomMode === 'fit-sheet') {
-      const top = svg.getBoundingClientRect ? svg.getBoundingClientRect().top : 0;
-      const availableHeight = Math.max(360, Number(window.innerHeight || 800) - Math.max(0, top) - 24);
-      state.zoom = Math.max(0.25, Math.min(1.5, availableWidth / baseWidth, availableHeight / baseHeight));
+      const availableHeight = Math.max(80, Number((host && host.clientHeight) || window.innerHeight || 800) - 20);
+      state.zoom = Math.max(0.02, Math.min(2, availableWidth / baseWidth, availableHeight / baseHeight));
     }
     svg.style.width = (baseWidth * state.zoom) + 'px';
     svg.style.height = (baseHeight * state.zoom) + 'px';
     const label = $('zoom-label');
-    if (label) label.textContent = state.zoomMode === 'fit-width' ? '适宽' : state.zoomMode === 'fit-sheet' ? '适页' : Math.round(state.zoom * 100) + '%';
+    const sheet = state.R && state.R.drawingSheet;
+    const mode = state.zoomMode === 'fit-width' ? '适宽' : state.zoomMode === 'fit-sheet' ? '适页' : '手动';
+    if (label) label.textContent = mode + ' · ' + (state.zoom * 100).toFixed(state.zoom < 0.1 ? 1 : 0) + '%' +
+      (sheet && sheet.format ? ' · ' + sheet.format : '');
     syncEditorGridStyle();
   }
-  window.zoomIn = function () { state.zoomMode = 'manual'; state.zoom = Math.min(4, state.zoom * 1.2); applyZoom(); };
-  window.zoomOut = function () { state.zoomMode = 'manual'; state.zoom = Math.max(0.25, state.zoom / 1.2); applyZoom(); };
+  function setManualZoom(nextZoom, clientX, clientY) {
+    const host = $('d-pile');
+    const oldZoom = state.zoom || 1;
+    const rect = host && host.getBoundingClientRect ? host.getBoundingClientRect() : { left: 0, top: 0 };
+    const offsetX = Number.isFinite(clientX) ? clientX - rect.left : Number(host && host.clientWidth || 0) / 2;
+    const offsetY = Number.isFinite(clientY) ? clientY - rect.top : Number(host && host.clientHeight || 0) / 2;
+    const drawingX = host ? (host.scrollLeft + offsetX) / oldZoom : 0;
+    const drawingY = host ? (host.scrollTop + offsetY) / oldZoom : 0;
+    state.zoomMode = 'manual';
+    state.zoom = Math.max(0.02, Math.min(8, Number(nextZoom) || oldZoom));
+    applyZoom();
+    if (host) {
+      host.scrollLeft = drawingX * state.zoom - offsetX;
+      host.scrollTop = drawingY * state.zoom - offsetY;
+    }
+  }
+  window.zoomIn = function () { setManualZoom(state.zoom * 1.2); };
+  window.zoomOut = function () { setManualZoom(state.zoom / 1.2); };
+  window.zoomActual = function () { setManualZoom(1); };
   window.zoomFitWidth = function () { state.zoomMode = 'fit-width'; applyZoom(); };
   window.zoomFitSheet = function () { state.zoomMode = 'fit-sheet'; applyZoom(); };
   window.addEventListener('resize', () => { if (/^fit-/.test(state.zoomMode)) applyZoom(); });
+
+  function bindViewportNavigation() {
+    if (state.viewportBound) return;
+    const host = $('d-pile');
+    if (!host) return;
+    state.viewportBound = true;
+    host.addEventListener('wheel', (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      const factor = Math.exp(-event.deltaY * 0.002);
+      setManualZoom(state.zoom * factor, event.clientX, event.clientY);
+    }, { passive: false });
+    window.addEventListener('keydown', (event) => {
+      if (event.code === 'Space' && !/INPUT|TEXTAREA|SELECT/.test(event.target && event.target.tagName || '')) {
+        state.viewportSpaceDown = true;
+        host.style.cursor = 'grab';
+        event.preventDefault();
+      }
+    });
+    window.addEventListener('keyup', (event) => {
+      if (event.code === 'Space') {
+        state.viewportSpaceDown = false;
+        if (!state.viewportPan) host.style.cursor = '';
+      }
+    });
+    host.addEventListener('pointerdown', (event) => {
+      if (!(event.button === 1 || (event.button === 0 && state.viewportSpaceDown))) return;
+      state.viewportPan = { pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+        left: host.scrollLeft, top: host.scrollTop };
+      host.setPointerCapture(event.pointerId);
+      host.style.cursor = 'grabbing';
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    host.addEventListener('pointermove', (event) => {
+      const pan = state.viewportPan;
+      if (!pan || pan.pointerId !== event.pointerId) return;
+      host.scrollLeft = pan.left - (event.clientX - pan.x);
+      host.scrollTop = pan.top - (event.clientY - pan.y);
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    const endPan = (event) => {
+      const pan = state.viewportPan;
+      if (!pan || pan.pointerId !== event.pointerId) return;
+      state.viewportPan = null;
+      host.style.cursor = state.viewportSpaceDown ? 'grab' : '';
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    host.addEventListener('pointerup', endPan, true);
+    host.addEventListener('pointercancel', endPan, true);
+  }
 
   /* ---------- 前置检查与导出 ---------- */
   function showReview(text) {
@@ -1176,7 +1714,17 @@
     const markup = svg.outerHTML;
     const issues = [], passes = [];
     const skill = window.EVSE_DRAWING_SKILL;
-    if (skill && typeof skill.auditMarkup === 'function') {
+    if (state.activePageGate) {
+      const gate = state.activePageGate;
+      (gate.quality && gate.quality.checks || []).forEach((check) => {
+        const message = check.code + '：' + check.detail;
+        if (check.ok) passes.push(message); else issues.push(message + ' [' + check.severity + ']');
+      });
+      if (gate.coverage && gate.coverage.ok) {
+        passes.push('PAGE-COVERAGE：' + gate.coverage.renderedCircuitCount + '/' + gate.coverage.expectedCircuitCount +
+          ' 条回路、' + gate.coverage.renderedOffPageConnectorCount + '/' + gate.coverage.expectedOffPageConnectorCount + ' 个跨页续接符精确覆盖。');
+      } else issues.push('PAGE-COVERAGE：当前页图形投影与全局 EDEM 不等价 [BLOCKING]');
+    } else if (skill && typeof skill.auditMarkup === 'function') {
       skill.auditMarkup(markup, DRAWING_KEY, state.R).checks.forEach((check) => {
         const message = check.code + '：' + check.detail;
         if (check.ok) passes.push(message); else issues.push(message + ' [' + check.severity + ']');
@@ -1194,6 +1742,165 @@
       '结论：这是自动前置检查，不等同于 GB/IEC/UL 规范符合性审查、型式试验、CAD 校审或专业签发。');
   };
 
+  async function requestEngineering(payload) {
+    const response = await fetch(ENGINEERING_API, {
+      method: 'POST', headers: authenticatedJsonHeaders(),
+      body: JSON.stringify(payload || {})
+    });
+    let body = null;
+    try { body = await response.json(); } catch (_) { /* handled below */ }
+    if (!response.ok || !body || body.ok === false) {
+      throw new Error((body && (body.error || body.message)) || ('工程 AI 请求失败（' + response.status + '）'));
+    }
+    return body.data || body.result || body;
+  }
+
+  function updateEngineeringAccessState() {
+    const host = $('engineering-ai-status');
+    const status = state.engineeringStatus || {};
+    const configured = !!status.configured;
+    const tokenPresent = !!engineeringAccessToken();
+    const ready = configured && tokenPresent;
+    if (host) {
+      if (!status.providerConfigured) host.textContent = '工程 AI 模型尚未由服务端配置；本地 EDEM/ERC/几何/经验规则仍可独立运行。';
+      else if (!status.accessControlConfigured) host.textContent = '工程 AI 访问控制未配置，公网模型功能已按安全策略关闭。';
+      else if (!tokenPresent) host.textContent = '受控工程 AI 已配置；请输入站点管理员分配的访问令牌后启用候选审图与数据手册检索。';
+      else host.textContent = '访问令牌仅保存在当前页面内存。上传内容只用于本次候选审查；AI 不能修改 EDEM、批准物料或签发图纸。';
+    }
+    if ($('ai-review-button')) $('ai-review-button').disabled = !ready;
+    if ($('bom-research-button')) $('bom-research-button').disabled = !ready;
+  }
+  async function loadEngineeringStatus() {
+    const host = $('engineering-ai-status');
+    try {
+      const response = await fetch(ENGINEERING_API + '?action=status', {
+        method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store'
+      });
+      if (!response.ok) throw new Error('status ' + response.status);
+      const body = await response.json();
+      const data = body && (body.data || body.result || body) || {};
+      const configured = !!(data.configured || data.openai || data.available);
+      state.engineeringStatus = Object.assign({}, data, { configured });
+      updateEngineeringAccessState();
+    } catch (_) {
+      state.engineeringStatus = { configured: false, providerConfigured: false, accessControlConfigured: false };
+      if (host) host.textContent = '未检测到受控工程 AI 服务；本地审图不受影响。';
+      if ($('ai-review-button')) $('ai-review-button').disabled = true;
+      if ($('bom-research-button')) $('bom-research-button').disabled = true;
+    }
+  }
+
+  function bytesToBase64(bytes) {
+    let binary = '';
+    const chunk = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(index, Math.min(index + chunk, bytes.length)));
+    }
+    return btoa(binary);
+  }
+
+  async function readReviewAttachment(file) {
+    if (!file) return null;
+    const allowed = new Set(['image/svg+xml', 'application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'application/json']);
+    const extension = String(file.name || '').split('.').pop().toLowerCase();
+    const fallback = { svg: 'image/svg+xml', pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg',
+      jpeg: 'image/jpeg', webp: 'image/webp', json: 'application/json' }[extension];
+    const mimeType = allowed.has(file.type) ? file.type : fallback;
+    if (!mimeType || !allowed.has(mimeType)) throw new Error('仅支持 SVG、PDF、PNG、JPG、WebP 或 JSON。');
+    if (!file.size || file.size > 2.5 * 1024 * 1024) throw new Error('待审文件必须不大于 2.5 MiB。');
+    const buffer = await file.arrayBuffer();
+    const digest = window.crypto && window.crypto.subtle
+      ? await window.crypto.subtle.digest('SHA-256', buffer) : null;
+    const sha256 = digest ? Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, '0')).join('') : '';
+    return {
+      name: String(file.name || 'drawing').slice(0, 180), mimeType, byteLength: file.size,
+      sha256: sha256 ? 'sha256-' + sha256 : '', dataBase64: bytesToBase64(new Uint8Array(buffer)), buffer
+    };
+  }
+
+  function reviewFindingMarkup(entry) {
+    const level = escapeHtml(entry.severity || 'WARN');
+    const color = level === 'BLOCK' || level === 'ERROR' ? '#f85149' : level === 'WARN' ? '#e3b341' : '#7fb8e8';
+    const evidence = Array.isArray(entry.evidence) && entry.evidence.length
+      ? '<br><span style="color:var(--text2)">证据/定位：' + entry.evidence.map(escapeHtml).join('；') + '</span>' : '';
+    return '<div class="editor-object" style="border-color:#29466f;margin-bottom:5px"><b style="color:' + color + '">' +
+      level + ' · ' + escapeHtml(entry.category || 'GENERAL') + '</b>　' + escapeHtml(entry.title || entry.id || '审查意见') +
+      '<br>' + escapeHtml(entry.detail || '') + evidence + '</div>';
+  }
+
+  function renderEngineeringReview(candidate, localCase) {
+    const host = $('engineering-review-output');
+    if (!host) return;
+    const local = localCase && Array.isArray(localCase.localFindings) ? localCase.localFindings : [];
+    const ai = candidate && Array.isArray(candidate.findings) ? candidate.findings : [];
+    const unresolved = candidate && Array.isArray(candidate.unresolvedItems) ? candidate.unresolvedItems : [];
+    host.innerHTML =
+      (candidate ? '<div class="candidate-banner"><b>CANDIDATE / UNREVIEWED</b> · ' + escapeHtml(candidate.disclaimer ||
+        'AI意见不改变模型、规则结论或发布状态。') + '</div>' : '') +
+      (candidate && candidate.summary ? '<div style="margin-bottom:8px"><b>AI 摘要：</b>' + escapeHtml(candidate.summary) + '</div>' : '') +
+      '<details open><summary>确定性规则发现（' + local.length + '）</summary>' +
+      (local.length ? local.map(reviewFindingMarkup).join('') : '<div class="editor-object">当前没有本地规则问题，仍不代表完成专业校审。</div>') + '</details>' +
+      (candidate ? '<details open><summary>AI 待复核发现（' + ai.length + '）</summary>' +
+        (ai.length ? ai.map(reviewFindingMarkup).join('') : '<div class="editor-object">AI 未返回可用结构化发现。</div>') + '</details>' : '') +
+      (unresolved.length ? '<details open><summary>未决项（' + unresolved.length + '）</summary><div class="editor-object">' +
+        unresolved.map(escapeHtml).join('<br>') + '</div></details>' : '');
+  }
+
+  window.runDeterministicEngineeringReview = async function () {
+    const module = window.SCHEMATIC_ENGINEERING_REVIEW;
+    const input = $('review-file');
+    const file = input && input.files && input.files[0];
+    try {
+      if (!state.R && !file) throw new Error('请先生成方案或选择一份待审图纸。');
+      if (!state.R && file) {
+        const attachment = await readReviewAttachment(file);
+        const host = $('engineering-review-output');
+        host.innerHTML = '<div class="candidate-banner">文件结构检查不等于电气审查。</div>' +
+          '<div>已读取：' + escapeHtml(attachment.name) + ' · ' + escapeHtml(attachment.mimeType) + ' · ' +
+          numberText(attachment.byteLength) + ' bytes<br>独立上传图没有对应 EDEM，无法在本地证明 PIN→PIN、网络完整性或图模等价；请运行 AI 候选审查并由工程师复核。</div>';
+        return;
+      }
+      if (!module || typeof module.buildCase !== 'function') throw new Error('工程审图封装模块未加载。');
+      const reviewCase = module.buildCase(state.R);
+      state.engineeringReviewCase = reviewCase;
+      renderEngineeringReview(null, reviewCase);
+    } catch (error) {
+      $('engineering-review-output').textContent = '本地审图未完成：' + humanError(error);
+    }
+  };
+
+  window.runAiEngineeringReview = async function () {
+    const button = $('ai-review-button');
+    const module = window.SCHEMATIC_ENGINEERING_REVIEW;
+    const input = $('review-file');
+    const file = input && input.files && input.files[0];
+    try {
+      if (!state.R && !file) throw new Error('请先生成方案或选择一份待审图纸。');
+      if (button) { button.disabled = true; button.textContent = '正在审图…'; }
+      const attachment = file ? await readReviewAttachment(file) : null;
+      const reviewCase = state.R && module && typeof module.buildCase === 'function'
+        ? module.buildCase(state.R, attachment ? { file: attachment } : null)
+        : { schema: 'schematic-engineering-review/v1', subject: { domain: 'EVSE', uploadedOnly: true },
+          reviewPolicy: { aiRole: 'OBSERVATION_ONLY', lifecycle: 'CANDIDATE', humanApprovalRequired: true } };
+      state.engineeringReviewCase = reviewCase;
+      const payload = { action: 'review', context: reviewCase };
+      if (attachment) payload.file = {
+        name: attachment.name, mimeType: attachment.mimeType, base64: attachment.dataBase64
+      };
+      const response = await requestEngineering(payload);
+      const raw = response.candidate || response.review || response;
+      const candidate = module && typeof module.normaliseCandidate === 'function'
+        ? module.normaliseCandidate(raw, reviewCase) : raw;
+      state.engineeringReviewCandidate = candidate;
+      renderEngineeringReview(candidate, reviewCase);
+    } catch (error) {
+      $('engineering-review-output').textContent = 'AI 审图未完成：' + humanError(error) + '。本地确定性设计与闸门没有被修改。';
+    } finally {
+      if (button) button.textContent = 'AI + 知识库审图';
+      updateEngineeringAccessState();
+    }
+  };
+
   function downloadBlob(blob, filename) {
     const a = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -1202,7 +1909,9 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function drawingName() {
-    return ((state.R && state.R.pileName) || '充电桩') + '_电气原理图';
+    const base = ((state.R && state.R.pileName) || '充电桩') + '_电气原理图';
+    const sheet = state.activePage && state.activePage.sheet;
+    return sheet ? base + '_' + (sheet.drawingNo || sheet.id || state.activeSheetId) : base;
   }
   function exportSvgMarkup(svg) {
     const clone = svg && svg.cloneNode ? svg.cloneNode(true) : null;
@@ -1220,7 +1929,34 @@
   function exportAllowed(format) {
     const skill = window.EVSE_DRAWING_SKILL;
     if (!skill || typeof skill.canExport !== 'function') return { allowed: false, reason: '绘图规则包未加载，禁止导出。' };
-    return skill.canExport(state.R, DRAWING_KEY, format);
+    if (state.activePage) {
+      const report = state.R && state.R.drawingSkill || {};
+      const graph = report.graphValidation || {};
+      const globalAudit = report.drawingAudits && report.drawingAudits[DRAWING_KEY];
+      const projectGate = state.schematicDocument && state.schematicDocument.projectGate;
+      if (Number(graph.blockingCount || 0) > 0) return { allowed: false, reason: '全局 EDEM/ERC 存在阻断项。' };
+      if (!globalAudit || Number(globalAudit.blockingCount || 0) > 0) return { allowed: false, reason: '全局单源图模审计未通过。' };
+      if (!projectGate || projectGate.status === 'BLOCKED') return { allowed: false, reason: '多 Sheet 项目闸门未通过。' };
+      const svg = getSvg();
+      const markup = exportSvgMarkup(svg);
+      const pageApi = window.EVSE_SCHEMATIC_SHEET_RENDERING || window.SCHEMATIC_FORGE_SHEET_RENDERING;
+      let livePageGate;
+      try {
+        livePageGate = pageApi && typeof pageApi.evaluatePage === 'function'
+          ? pageApi.evaluatePage(state.R, state.schematicDocument, state.activeSheetId,
+            state.activePage.compiled, markup)
+          : null;
+      } catch (error) {
+        return { allowed: false, reason: '导出时重新读取当前页失败：' + humanError(error) + '。' };
+      }
+      if (!livePageGate || livePageGate.allowed !== true) return {
+        allowed: false,
+        reason: '导出时重新读取最终 SVG，发现 Drawing IR、页面骨架、几何或跨页精确覆盖不一致。'
+      };
+      return { allowed: true, reason: (livePageGate.status === 'REVIEW_REQUIRED' ? '当前页需要版式复核；' : '') +
+        '允许导出方案级当前页，仍须专业校审与签发。', format };
+    }
+    return skill.canExport(state.R, DRAWING_KEY, format, exportSvgMarkup(getSvg()));
   }
   function svgMatchesDrawingIR(svg) {
     const R = state.R || {};
@@ -1250,6 +1986,7 @@
         title: drawingName(), drawing: DRAWING_KEY,
         project: state.R && state.R.pileName,
         documentStatus: state.R && state.R.documentStatus,
+        drawingIRHash: state.R && state.R.drawingGeometryHash,
         notice: '可编辑 DXF 概念草图；复杂符号、图层、线宽、比例和打印样式须在 CAD 模板中复核。'
       };
       if (!state.R || !state.R.drawingIR || typeof exporter.exportDrawingIR !== 'function') {
@@ -1258,6 +1995,12 @@
       const result = exporter.exportDrawingIR(state.R.drawingIR, options);
       const dxf = typeof result === 'string' ? result : (result && (result.dxf || result.text));
       if (!dxf || !/^\s*0\s*[\r\n]+SECTION/m.test(dxf)) throw new Error('DXF 转换结果无效');
+      const auditor = window.EVSE_RENDERED_DXF_AUDIT;
+      const readback = auditor && typeof auditor.audit === 'function'
+        ? auditor.audit(dxf, state.R.drawingIR)
+        : { ok: false, errors: [{ code: 'DXF_READBACK_AUDITOR_MISSING' }] };
+      if (!readback.ok) throw new Error('最终 DXF 反读与当前 Drawing IR 不一致：' +
+        (readback.errors || []).slice(0, 5).map((item) => item.code + ':' + item.id).join(', '));
       downloadBlob(new Blob([dxf], { type: 'application/dxf;charset=utf-8' }), drawingName() + '.dxf');
       if (result && Array.isArray(result.warnings) && result.warnings.length) {
         showReview('DXF 已导出，但转换器提示：\n- ' + result.warnings.join('\n- ') + '\n请在 CAD 中复核后使用。');
@@ -1269,13 +2012,27 @@
   window.downloadJson = function () {
     if (!state.R) return;
     const packageData = {
-      schema: 'EVSE-SOLUTION-PACKAGE/1.0',
+      schema: 'SCHEMATICFORGE-DIAGNOSTIC-PACKAGE/2.0',
       exportedAt: new Date().toISOString(),
       documentStatus: state.R.documentStatus,
+      artifactStatus: 'DRAFT_DIAGNOSTIC',
       notice: '方案级自动原理图；不构成生产图、施工图、标准符合性证明、型式试验结论或设备报价。',
       releaseGate: state.R.releaseGate || (state.R.readiness && state.R.readiness.release) || { constructionDrawingAllowed: false },
       drawingGeometryHash: state.R.drawingGeometryHash || null,
       drawingIR: state.R.drawingIR || null,
+      schematicDocument: state.schematicDocument || null,
+      renderedPageManifest: state.renderedSchematicDocument ? state.renderedSchematicDocument.pages.map((page) => ({
+        sheetId: page.sheetId, drawingNo: page.sheet && page.sheet.drawingNo,
+        geometryHash: (state.pageEdits[page.sheetId] || page).geometryHash,
+        projectionHash: page.projectionHash,
+        pageGate: (state.pageEdits[page.sheetId] || page).pageGate,
+        edited: !!state.pageEdits[page.sheetId]
+      })) : [],
+      activeSheet: state.R.activeSheet || null,
+      editableDocuments: state.R.editableDocuments || {},
+      engineeringBom: state.engineeringBom || null,
+      bomResearchCandidates: state.bomResearchCandidates || [],
+      engineeringReviewCandidate: state.engineeringReviewCandidate || null,
       model: state.R
     };
     downloadBlob(new Blob([JSON.stringify(packageData, null, 2)], { type: 'application/json;charset=utf-8' }), 'evse-solution-' + Date.now() + '.json');
@@ -1348,9 +2105,20 @@
       if ($('f-requirement-confirm')) $('f-requirement-confirm').checked = false;
     });
     $('f-model').addEventListener('change', updateProviderStatus);
+    if ($('f-ai-access-token')) $('f-ai-access-token').addEventListener('input', () => {
+      updateEngineeringAccessState(); updateProviderStatus();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      document.body.classList.toggle('workspace-mode', !!document.fullscreenElement);
+      updateEditorControls();
+      setTimeout(() => { if (/^fit-/.test(state.zoomMode)) applyZoom(); }, 0);
+    });
     toggleEssFields();
     updateStandardHelp();
     loadProviderStatus();
+    loadEngineeringStatus();
+    bindViewportNavigation();
+    updateEditorControls();
   });
 
   window.EVSE_APP = { state, getParams, parseNLLocal };

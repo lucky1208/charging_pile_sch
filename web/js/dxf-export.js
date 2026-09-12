@@ -334,6 +334,13 @@
       to: primitive.to || '',
       physicalFrom: primitive.physicalFrom || '',
       physicalTo: primitive.physicalTo || '',
+      graphicalFrom: primitive.graphicalFrom || '',
+      graphicalTo: primitive.graphicalTo || '',
+      offPageConnectorId: primitive.offPageConnectorId || '',
+      xrefSheet: primitive.xrefSheet || '',
+      xrefPage: primitive.xrefPage || '',
+      xrefDrawingNo: primitive.xrefDrawingNo || '',
+      xrefEndpoint: primitive.xrefEndpoint || '',
       routeIds: Array.isArray(primitive.routeIds) ? primitive.routeIds.join(',') : '',
       bridgeRouteId: primitive.bridgeRouteId || ''
     }, extra || {});
@@ -385,8 +392,8 @@
       routeIds.add(id);
       const primitive = routePrimitives.get(id);
       if (!primitive) throw directError('DRAWING_IR_ROUTE_PRIMITIVE_MISSING', 'Route has no renderer-neutral polyline primitive.', { routeId: id });
-      const expectedFrom = route.source && route.source.ref || '';
-      const expectedTo = route.target && route.target.ref || '';
+      const expectedFrom = route.globalSource && route.globalSource.ref || route.source && route.source.ref || '';
+      const expectedTo = route.globalTarget && route.globalTarget.ref || route.target && route.target.ref || '';
       if (!samePoints(route.points, primitive.points) ||
           String(primitive.netId || '') !== String(route.netId || '') ||
           String(primitive.circuitId || '') !== String(route.circuitId || '') ||

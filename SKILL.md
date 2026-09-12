@@ -1,10 +1,10 @@
 ---
 name: evse-schematic-design
-description: 生成充电桩（EVSE）方案级端子原理图与方案包：将 GB/T、CCS2、CCS1、NACS、CHAdeMO 及直流一体、直流分体、交直流一体、储能移动桩需求编译为 EDEM v4 端子网表，经 ERC、确定性布线和图模等价性闸门后输出 SVG、R2010 DXF 与 JSON。
-version: 2.5.0
+description: 生成充电桩（EVSE）方案级端子原理图与工程附件：将 GB/T、CCS2、CCS1、NACS、CHAdeMO 及直流一体、直流分体、交直流一体、储能移动桩需求编译为 EDEM v4 端子网表，经 ERC、闭环追踪、确定性布线和最终 SVG/DXF 反读闸门后输出六页图册、BOM、逐 PIN 接线、RFQ 与审计证据。
+version: 2.7.0
 author: 卢继雄
 created_at: 2026-08-18
-updated_at: 2026-09-03
+updated_at: 2026-09-11
 ---
 
 # 充电桩端子级电气原理图自动设计
@@ -38,10 +38,11 @@ RequirementSpec（来源/置信度/未决项/人工确认）
   -> 确定性选型
   -> 受控 DeviceClass + physical terminals
   -> EDEM v4 instances / nets / exact circuits
-  -> ERC
+  -> ERC + 同一物理电源输出对/PE 闭环追踪
   -> placement + channel/lane router
-  -> Drawing IR + coverage + geometry audit
+  -> Drawing IR + coverage + geometry + 文字 clearance audit
   -> SVG renderer / DXF exporter
+  -> 最终 SVG / DXF 独立反读
 ```
 
 其中 AC 的 L1/L2/L3/N、DC+/DC−、PE、24V/0V 和 12V/0V 均为独立电气网络。DXF 主路径直接消费 Drawing IR，不解析 SVG 来重建几何。
@@ -59,7 +60,7 @@ RequirementSpec（来源/置信度/未决项/人工确认）
 4. 自动翻译低于置信度阈值、缺失置信度或仍有未决项时，必须先让用户复核，再设置 `requirementConfirmed=true` 或显式传入 `--confirm-requirements`。
 5. 退出码：
 
-   - `0`：SVG、DXF、JSON 均已通过方案级导出闸门；
+   - `0`：S01–S06 六页 SVG、六页 DXF、全项目 JSON、BOM、逐 PIN 接线、RFQ 和审计证据均已通过方案级导出闸门；文件名为 `<前缀>_EVSE-01..06.*`、`<前缀>.json` 与 `<前缀>_{BOM,WIRING,RFQ,AUDIT}.*`；
    - `1`：输入、实现范围或人工确认闸门失败；
    - `2`：ERC、Drawing IR、图模覆盖或渲染审计失败；只保留 JSON 诊断，不交付图纸。
 
@@ -69,7 +70,7 @@ RequirementSpec（来源/置信度/未决项/人工确认）
 npx serve <skill目录>\web
 ```
 
-浏览器打开本地地址。此静态启动方式可使用表单、本地规则需求解析和确定性出图；发布仓库中的 `api/ai.js` 可在 Vercel 上提供同源 AI 需求翻译代理，密钥仅通过服务端环境变量配置，静态服务不可用时安全回退本地解析。Web 加载由 `engine/` 生成的 bundle，CLI 按同一受控顺序直接加载这些 `engine/` 模块；两者不再维护第二份手工核心代码。任何 `engine/*.js` 改动后必须执行：
+浏览器打开本地地址。此静态启动方式可使用表单、本地规则需求解析和确定性多页出图；参数、元器件库和“属性 / PIN / 网络”位于图纸上方的横向控制台，可整体收起。发布仓库中的 `api/ai.js` 可在 Vercel 上提供同源 AI 需求翻译代理，模型密钥仅通过服务端环境变量配置；所有 AI POST 还要求站点配置不少于 32 字节的 `ENGINEERING_API_ACCESS_TOKEN`，浏览器只在本页内存持有用户输入的访问令牌。静态服务不可用时安全回退本地解析。Web 加载由 `engine/` 生成的 bundle，CLI 按同一受控顺序直接加载这些 `engine/` 模块和同一个六页编译器；两者不再维护第二份手工核心代码。任何 `engine/*.js` 改动后必须执行：
 
 ```powershell
 npm run verify

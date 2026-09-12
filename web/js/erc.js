@@ -8,7 +8,7 @@
 window.EVSE_ERC = (function () {
   'use strict';
 
-  const VERSION = '1.4.0';
+  const VERSION = '1.5.0';
   const KNOWN_NET_CLASSES = Object.freeze([
     'POWER_AC', 'POWER_DC', 'POWER_DC_ESS', 'POWER_DC_AUX',
     'PROTECTIVE_EARTH', 'SIGNAL_CTRL', 'SIGNAL_COMM', 'POWER_INTERFACE_MODED'
@@ -1904,6 +1904,21 @@ window.EVSE_ERC = (function () {
       });
     });
 
+    let loopIntegrity = null;
+    run('ERC-086', '同源回流与保护接地完整性', () => {
+      const auditor = window.EVSE_LOOP_INTEGRITY;
+      if (!auditor || typeof auditor.audit !== 'function') {
+        report('ERC-086', 'LOOP_AUDITOR_MISSING', '回路完整性模块未加载。', 'loopIntegrity');
+        return;
+      }
+      loopIntegrity = auditor.audit(model);
+      loopIntegrity.records.filter((item) => item.status !== 'PASS').forEach((item) => {
+        report('ERC-086', item.status === 'NOT_EVALUATED'
+          ? 'PROJECT_VALUE_NOT_EVALUATED' : item.family + ':' + item.code,
+        item.detail, item.deviceId, item.status === 'NOT_EVALUATED' ? 'WARN' : 'BLOCK', [item]);
+      });
+    });
+
     const blockingCount = violations.filter((item) => item.severity === 'BLOCK').length;
     const warningCount = violations.filter((item) => item.severity === 'WARN').length;
     return {
@@ -1912,6 +1927,7 @@ window.EVSE_ERC = (function () {
       status: blockingCount ? 'BLOCKED' : 'PASS',
       blockingCount,
       warningCount,
+      loopIntegrity,
       checks,
       violations,
       stats: {

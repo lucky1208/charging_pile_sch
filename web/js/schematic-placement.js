@@ -15,8 +15,8 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.2.0';
-  const GRID_SCHEMA = 'EVSE-SCHEMATIC-PLACEMENT/1.2';
+  const VERSION = '1.3.0';
+  const GRID_SCHEMA = 'EVSE-SCHEMATIC-PLACEMENT/1.3';
 
   class SchematicCompileError extends Error {
     constructor(code, message, details) {
@@ -57,19 +57,24 @@
      connection that is absent from EDEM. */
   const ZONE_DEFINITIONS = Object.freeze([
     Object.freeze({ id: 'POWER_FLOW', order: 10,
-      title: '主功率回路  AC输入 → 保护/计量 → 功率变换 → DC母线 → 充电接口',
+      title: '主功率回路',
+      description: 'AC输入 → 保护/计量 → 功率变换 → DC母线 → 充电接口',
       flow: 'AC_IN_TO_EV_OUTPUT' }),
     Object.freeze({ id: 'ESS_RECHARGE', order: 20,
-      title: '储能与补电回路  补电接口/电池 → 预充与保护 → ESS母线 → 双向变换',
+      title: '储能与补电回路',
+      description: '补电接口/电池 → 预充与保护 → ESS母线 → 双向变换',
       flow: 'ENERGY_STORAGE_AND_RECHARGE' }),
     Object.freeze({ id: 'AUXILIARY', order: 30,
-      title: '辅助电源与热管理  高压/AC → 24V → 12V → 风机/加热/执行器',
+      title: '辅助电源与热管理',
+      description: '高压/AC → 24V → 12V → 风机/加热/执行器',
       flow: 'AUXILIARY_POWER' }),
     Object.freeze({ id: 'SAFETY_DIAGNOSTICS', order: 35,
-      title: '送电许可与诊断  CP发生/采样/二极管检查 → 输出预检 → 逐极反馈/粘连监测',
+      title: '送电许可与诊断',
+      description: 'CP发生/采样/二极管检查 → 输出预检 → 逐极反馈/粘连监测',
       flow: 'PRE_ENERGIZATION_AND_CONTACTOR_DIAGNOSTICS' }),
     Object.freeze({ id: 'CONTROL_COMM', order: 40,
-      title: '控制、安全与通信  BMS/CCU → 网关/HMI/OCPP → 现场执行与采样',
+      title: '控制、安全与通信',
+      description: 'BMS/CCU → 网关/HMI/OCPP → 现场执行与采样',
       flow: 'CONTROL_AND_COMMUNICATION' }),
     Object.freeze({ id: 'PROTECTIVE_EARTH', order: 50,
       title: '保护接地与等电位连接', flow: 'PROTECTIVE_EARTH' })
@@ -107,6 +112,8 @@
     'control-pilot-generator': 0, 'control-pilot-monitor': 10,
     'vehicle-diode-detector': 20, 'output-precheck-monitor': 30,
     'contactor-state-monitor': 40,
+    'off-page-connector-incoming': -10,
+    'off-page-connector-outgoing': 990,
     'earth-bar': 0
   });
 
@@ -180,6 +187,13 @@
     const kind = text(instance && instance.kind).toLowerCase();
     const system = text(instance && instance.system).toLowerCase();
     const classes = terminalNetClasses(instance);
+    if (/^off-page-connector-/.test(kind)) {
+      if (classes.has('POWER_DC_ESS') || classes.has('POWER_INTERFACE_MODED')) return 'ESS_RECHARGE';
+      if (classes.has('POWER_DC_AUX')) return 'AUXILIARY';
+      if (classes.has('POWER_AC') || classes.has('POWER_DC')) return 'POWER_FLOW';
+      if (classes.has('PROTECTIVE_EARTH')) return 'PROTECTIVE_EARTH';
+      return 'CONTROL_COMM';
+    }
     if (kind === 'earth-bar' || system === 'earth' || system === 'pe') return 'PROTECTIVE_EARTH';
     if (kind === 'control-pilot-generator' || kind === 'control-pilot-monitor' ||
         kind === 'vehicle-diode-detector' || kind === 'output-precheck-monitor' ||
@@ -286,6 +300,38 @@
         branch: branchNumber(instance)
       })).sort((a, b) => a.stageOrder - b.stageOrder || compareText(a.stageKey, b.stageKey) ||
         (a.branch || 0) - (b.branch || 0) || compareText(a.instance.id, b.instance.id));
+      /* A mobile-storage power chain can contain several replenishment
+         paths, battery strings, precharge/protection elements and selectors.
+         Keeping all of them on one row creates a non-standard metre-wide
+         sheet. Fold only this functional zone as a deterministic serpentine
+         flow: consecutive stages remain adjacent, while the EDEM circuit
+         direction and every routed endpoint remain unchanged. */
+      const essFoldColumns = Math.max(6, Math.floor(Number(opts.essFoldColumnLimit || 12)));
+      if (definitionValue.id === 'ESS_RECHARGE' && staged.length > essFoldColumns) {
+        let maximumLocalRow = 0;
+        staged.forEach((item, index) => {
+          const localRow = Math.floor(index / essFoldColumns);
+          const offset = index % essFoldColumns;
+          const col = localRow % 2 ? essFoldColumns - 1 - offset : offset;
+          const row = baseRow + localRow;
+          cells.set(item.instance.id, { row, col, zoneId: definitionValue.id,
+            stage: item.stageOrder, branch: item.branch, folded: true });
+          maximumColumn = Math.max(maximumColumn, col);
+          maximumLocalRow = Math.max(maximumLocalRow, localRow);
+        });
+        zones.push({
+          id: definitionValue.id,
+          title: definitionValue.title,
+          flow: definitionValue.flow,
+          order: definitionValue.order,
+          layout: 'SERPENTINE_STAGE_FOLD',
+          startRow: baseRow,
+          endRow: baseRow + maximumLocalRow,
+          deviceIds: members.map((instance) => instance.id).sort(compareText)
+        });
+        baseRow += maximumLocalRow + 1;
+        return;
+      }
       const stageGroups = [];
       staged.forEach((item) => {
         let group = stageGroups.find((candidate) => candidate.key === item.stageKey);
@@ -323,6 +369,7 @@
       zones.push({
         id: definitionValue.id,
         title: definitionValue.title,
+        description: definitionValue.description || '',
         flow: definitionValue.flow,
         order: definitionValue.order,
         startRow: baseRow,
@@ -341,9 +388,17 @@
   }
 
   function estimatedTextWidth(value, height) {
-    let units = 0;
-    Array.from(text(value)).forEach((character) => { units += character.charCodeAt(0) > 255 ? 1 : 0.62; });
-    return units * height;
+    return Array.from(text(value)).reduce((sum, character) => {
+      if (/\s/u.test(character)) return sum + height * 0.35;
+      const code = character.codePointAt(0);
+      const wide = code >= 0x1100 && (code <= 0x115f || code === 0x2329 || code === 0x232a ||
+        (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
+        (code >= 0xac00 && code <= 0xd7a3) || (code >= 0xf900 && code <= 0xfaff) ||
+        (code >= 0xfe10 && code <= 0xfe19) || (code >= 0xfe30 && code <= 0xfe6f) ||
+        (code >= 0xff00 && code <= 0xff60) || (code >= 0xffe0 && code <= 0xffe6) ||
+        (code >= 0x1f300 && code <= 0x1faff) || (code >= 0x20000 && code <= 0x3fffd));
+      return sum + height * (wide ? 1 : 0.58);
+    }, 0);
   }
 
   function chooseDrawingSheet(requiredWidth, requiredHeight) {
@@ -659,11 +714,14 @@
       minimumHorizontalGap: 88,
       minimumVerticalGap: 96,
       zoneStackLimit: 4,
+      essFoldColumnLimit: 12,
       left: 40,
       top: 68,
       rightMargin: 34,
       bottomMargin: 80,
-      scheduleWidth: 420
+      scheduleWidth: 420,
+      includeSchedule: true,
+      zoneTitleBandHeight: 30
     }, options || {});
     const allInstances = sortInstances(model.instances);
     const circuits = model.circuits.slice().sort((a, b) => compareText(a.id, b.id));
@@ -745,15 +803,37 @@
       });
     });
 
+    function compareOccurrences(left, right) {
+      return compareText(left.terminalId, right.terminalId) ||
+        compareText(left.circuitId, right.circuitId) || compareText(left.role, right.role) ||
+        compareText(left.side, right.side) || compareText(left.id, right.id) || left.order - right.order;
+    }
+
+    function isOffPageConnector(instance) {
+      return /^off-page-connector-(?:incoming|outgoing)$/.test(text(instance && instance.kind).toLowerCase()) ||
+        text(instance && instance.projectionRole).toUpperCase() === 'OFF_PAGE_CONNECTOR_BANK';
+    }
+
+    function orderedOffPageOccurrences(sides) {
+      return [].concat(sides.LEFT, sides.RIGHT).sort(compareOccurrences);
+    }
+
     occurrencesByInstance.forEach((sides) => ['LEFT', 'RIGHT'].forEach((side) => {
-      sides[side].sort((a, b) => compareText(a.terminalId, b.terminalId) ||
-        compareText(a.circuitId, b.circuitId) || compareText(a.role, b.role));
+      sides[side].sort(compareOccurrences);
     }));
 
     const dimensions = new Map();
     instances.forEach((instance) => {
       const sides = occurrencesByInstance.get(instance.id);
-      const maximumPorts = Math.max(sides.LEFT.length, sides.RIGHT.length, 1);
+      /* A continuation bank contains independent cross-page circuits, not
+         paired left/right terminals of one physical device.  Count every
+         connector row so two unrelated PIN references can never be assigned
+         the same vertical slot merely because their routes approach the bank
+         from opposite sides.  Ordinary equipment retains its compact,
+         side-local row calculation. */
+      const maximumPorts = isOffPageConnector(instance)
+        ? Math.max(orderedOffPageOccurrences(sides).length, 1)
+        : Math.max(sides.LEFT.length, sides.RIGHT.length, 1);
       const longestTerminalLabel = Math.max(0, ...[].concat(sides.LEFT, sides.RIGHT).map((occurrence) =>
         estimatedTextWidth(occurrence.terminal && (occurrence.terminal.label || occurrence.terminal.id) || occurrence.terminalId, 10)));
       const width = Math.max(opts.deviceWidth, Math.min(opts.maximumDeviceWidth, 78 + longestTerminalLabel * 1.7));
@@ -807,7 +887,10 @@
     });
 
     const horizontalAllocations = horizontalIntervals.map((intervals) => laneResult(IR, intervals));
-    const horizontalGapHeights = horizontalAllocations.map((allocation) => Math.max(
+    const zoneStartRows = new Set(functionalLayout.zones.map((zone) => zone.startRow));
+    const titleBandByGap = horizontalAllocations.map((allocation, gap) =>
+      zoneStartRows.has(gap) ? Math.max(24, Number(opts.zoneTitleBandHeight) || 30) : 0);
+    const horizontalGapHeights = horizontalAllocations.map((allocation, gap) => titleBandByGap[gap] + Math.max(
       opts.minimumHorizontalGap,
       opts.channelInset * 2 + Math.max(0, allocation.laneCount - 1) * opts.lanePitch + 1
     ));
@@ -827,7 +910,8 @@
       if (entry.direct) return;
       const lane = horizontalAllocations[entry.horizontalGap].byId[entry.circuit.id];
       entry.horizontalLaneIndex = lane;
-      entry.horizontalY = horizontalGapTop[entry.horizontalGap] + opts.channelInset + lane * opts.lanePitch;
+      entry.horizontalY = horizontalGapTop[entry.horizontalGap] + titleBandByGap[entry.horizontalGap] +
+        opts.channelInset + lane * opts.lanePitch;
     });
 
     const anchorDrafts = new Map();
@@ -836,6 +920,21 @@
       const deviceHeight = dimensions.get(instance.id).height;
       const deviceY = rowTop[cell.row] + (rowHeights[cell.row] - deviceHeight) / 2;
       const sides = occurrencesByInstance.get(instance.id);
+      if (isOffPageConnector(instance)) {
+        const rows = orderedOffPageOccurrences(sides);
+        /* Adjacent continuation banks face the same routing corridor.  If
+           their nth rows are exactly level, two different nets can share an
+           initial horizontal stub before reaching their lane.  Stagger the
+           whole bank by half a route pitch according to its column; rows
+           within a bank keep their proven spacing and remain inside its box. */
+        const bankStagger = (cell.col % 2 === 0 ? -1 : 1) *
+          Math.min(4, Math.max(0, Number(opts.lanePitch) || 0) / 2);
+        rows.forEach((occurrence, index) => {
+          const anchorY = deviceY + (index + 1) * deviceHeight / (rows.length + 1) + bankStagger;
+          anchorDrafts.set(occurrence.id, { occurrence, y: anchorY, side: occurrence.side });
+        });
+        return;
+      }
       ['LEFT', 'RIGHT'].forEach((side) => sides[side].forEach((occurrence, index) => {
         const anchorY = deviceY + (index + 1) * deviceHeight / (sides[side].length + 1) + occurrence.order * 0.0001;
         anchorDrafts.set(occurrence.id, { occurrence, y: anchorY, side });
@@ -848,15 +947,15 @@
       const targetAnchor = anchorDrafts.get(entry.targetOccurrence.id);
       if (entry.direct) {
         verticalIntervals[entry.sourceCorridor].push({
-          id: entry.circuit.id + ':DIRECT', start: sourceAnchor.y, end: targetAnchor.y
-        });
+          id: entry.circuit.id + ':DIRECT',
+          start: sourceAnchor.y, end: targetAnchor.y });
       } else {
         verticalIntervals[entry.sourceCorridor].push({
-          id: entry.circuit.id + ':FROM', start: sourceAnchor.y, end: entry.horizontalY
-        });
+          id: entry.circuit.id + ':FROM',
+          start: sourceAnchor.y, end: entry.horizontalY });
         verticalIntervals[entry.targetCorridor].push({
-          id: entry.circuit.id + ':TO', start: targetAnchor.y, end: entry.horizontalY
-        });
+          id: entry.circuit.id + ':TO',
+          start: targetAnchor.y, end: entry.horizontalY });
       }
     });
     const verticalAllocations = verticalIntervals.map((intervals) => laneResult(IR, intervals));
@@ -918,6 +1017,12 @@
         system: instance.system,
         tag: shortTag(instance),
         referenceDesignation: instance.referenceDesignation || instance.ref,
+        modelInstanceId: instance.modelInstanceId || instance.graphicalRepresentationOf || instance.id,
+        graphicalRepresentationOf: instance.graphicalRepresentationOf || instance.modelInstanceId || instance.id,
+        graphicUnitIndex: instance.graphicUnitIndex,
+        graphicUnitCount: instance.graphicUnitCount,
+        projectionRole: instance.projectionRole || '',
+        offPageConnectors: instance.offPageConnectors || [],
         label: shortTag(instance) + ' ' + text(instance.name || instance.kind),
         bbox: { x, y, width: dimension.width, height: dimension.height },
         ports
@@ -985,15 +1090,14 @@
     const zonePlans = functionalLayout.zones.map((zone) => {
       const topGap = zone.startRow;
       const bottomGap = zone.endRow + 1;
-      const yMin = topGap === 0
-        ? horizontalGapTop[topGap] + 3
-        : horizontalGapTop[topGap] + horizontalGapHeights[topGap] / 2;
+      const yMin = horizontalGapTop[topGap] + 3;
       const yMax = bottomGap === rows
         ? horizontalGapTop[bottomGap] + horizontalGapHeights[bottomGap] - 3
-        : horizontalGapTop[bottomGap] + horizontalGapHeights[bottomGap] / 2;
+        : horizontalGapTop[bottomGap] - 3;
       return Object.freeze({
         id: zone.id,
         title: zone.title,
+        description: zone.description || '',
         flow: zone.flow,
         order: zone.order,
         startRow: zone.startRow,
@@ -1007,6 +1111,52 @@
       });
     });
     const annotations = [];
+    const placedTitleBoxes = [];
+    function titleBox(x, y, value) {
+      const height = 11;
+      const width = Math.max(height, estimatedTextWidth(value, height));
+      return { x1: x, y1: y - height * 0.65, x2: x + width, y2: y + height * 0.65 };
+    }
+    function boxesOverlap(first, second, padding) {
+      const gap = Number(padding || 0);
+      return first.x1 < second.x2 + gap && first.x2 > second.x1 - gap &&
+        first.y1 < second.y2 + gap && first.y2 > second.y1 - gap;
+    }
+    function segmentHitsBox(segment, box) {
+      if (segment.orientation === 'horizontal') return segment.y1 > box.y1 && segment.y1 < box.y2 &&
+        Math.max(segment.x1, segment.x2) > box.x1 && Math.min(segment.x1, segment.x2) < box.x2;
+      return segment.x1 > box.x1 && segment.x1 < box.x2 &&
+        Math.max(segment.y1, segment.y2) > box.y1 && Math.min(segment.y1, segment.y2) < box.y2;
+    }
+    function titlePosition(zone) {
+      const width = Math.max(11, estimatedTextWidth(zone.title, 11));
+      const xCandidates = Array.from(new Set([
+        zone.x + 8,
+        Math.max(zone.x + 8, zone.x + zone.width - width - 8),
+        Math.max(zone.x + 8, zone.x + (zone.width - width) / 2)
+      ]));
+      for (let x = zone.x + 28; x + width < zone.x + zone.width - 4; x += 20) xCandidates.push(x);
+      const yCandidates = [];
+      const lastY = Math.max(zone.y + 11, Math.min(zone.y + zone.height - 9, zone.y + 58));
+      for (let y = zone.y + 11; y <= lastY + 1e-9; y += 4) yCandidates.push(y);
+      for (const y of yCandidates) {
+        for (const x of xCandidates) {
+          const box = titleBox(x, y, zone.title);
+          if (box.x2 > zone.x + zone.width - 4 || box.y2 > zone.y + zone.height - 3) continue;
+          if (placedDevices.some((device) => boxesOverlap(box, {
+            x1: device.bbox.x, y1: device.bbox.y,
+            x2: device.bbox.x + device.bbox.width, y2: device.bbox.y + device.bbox.height
+          }, 2))) continue;
+          if (placedTitleBoxes.some((other) => boxesOverlap(box, other, 3))) continue;
+          if (routes.some((route) => route.segments.some((segment) => segmentHitsBox(segment, box)))) continue;
+          placedTitleBoxes.push(box);
+          return { x, y, status: 'CLEARANCE_CHECKED' };
+        }
+      }
+      const fallback = titleBox(zone.x + 8, zone.y + 11, zone.title);
+      placedTitleBoxes.push(fallback);
+      return { x: zone.x + 8, y: zone.y + 11, status: 'CLEARANCE_NOT_PROVEN' };
+    }
     zonePlans.forEach((zone) => {
       annotations.push({
         id: 'ZONE:' + zone.id + ':BOUNDARY',
@@ -1014,16 +1164,20 @@
         zoneId: zone.id, x: zone.x, y: zone.y, width: zone.width, height: zone.height,
         strokeWidth: 0.8, dash: '8,5', fill: 'none'
       });
+      const titlePlacement = titlePosition(zone);
       annotations.push({
         id: 'ZONE:' + zone.id + ':TITLE',
         kind: 'text', layer: 'EVSE-TEXT', annotationRole: 'functional-zone-title',
-        zoneId: zone.id, x: zone.x + 8, y: zone.y + 11,
+        zoneId: zone.id, x: titlePlacement.x, y: titlePlacement.y,
+        placementStatus: titlePlacement.status,
         text: zone.title, height: 11, anchor: 'start', weight: 'bold'
       });
     });
-    const requiredWidth = contentRight + opts.scheduleWidth + opts.rightMargin;
-    const scheduleBottomEstimate = opts.top + 40 + instances.length * 32;
-    const requiredHeight = Math.max(contentBottom + opts.bottomMargin, scheduleBottomEstimate + 340);
+    const requiredWidth = contentRight + (opts.includeSchedule ? opts.scheduleWidth : 0) + opts.rightMargin;
+    const scheduleBottomEstimate = opts.top + 44 + instances.length * 38;
+    const requiredHeight = opts.includeSchedule
+      ? Math.max(contentBottom + opts.bottomMargin, scheduleBottomEstimate + 340)
+      : contentBottom + opts.bottomMargin;
     const sheet = chooseDrawingSheet(requiredWidth, requiredHeight);
 
     const drawingIR = IR.buildDrawingIR({
@@ -1054,7 +1208,7 @@
           plotScaleDenominator: sheet.plotScaleDenominator
         },
         functionalZones: zonePlans.map((zone) => ({
-          id: zone.id, title: zone.title, flow: zone.flow,
+          id: zone.id, title: zone.title, description: zone.description, flow: zone.flow,
           deviceCount: zone.deviceCount, deviceIds: zone.deviceIds
         })),
         readability: {
@@ -1067,7 +1221,8 @@
           verticalDeviceGapMin: opts.minimumHorizontalGap,
           symbolTextHeightMin: 8,
           terminalLabelTextHeight: 10,
-          zoneTitleTextHeight: 11
+          zoneTitleTextHeight: 11,
+          zoneTitleBandHeight: titleBandByGap.filter((height) => height > 0)[0] || 0
         }
       },
       unit: 'mm',
@@ -1092,7 +1247,12 @@
       requiredHeight,
       sheet,
       content: Object.freeze({ left: opts.left, top: opts.top, right: contentRight, bottom: contentBottom }),
-      schedule: Object.freeze({ x: contentRight + 24, y: opts.top, width: opts.scheduleWidth - 34 }),
+      schedule: Object.freeze({
+        x: contentRight + 24,
+        y: opts.top,
+        width: opts.includeSchedule ? Math.max(40, opts.scheduleWidth - 34) : 0,
+        included: opts.includeSchedule === true
+      }),
       zones: Object.freeze(zonePlans),
       readability: Object.freeze({
         nominalPlotScale: '1:4', plotScaleDenominator: 4,
@@ -1102,7 +1262,8 @@
         verticalDeviceGapMin: opts.minimumHorizontalGap,
         symbolTextHeightMin: 8,
         terminalLabelTextHeight: 10,
-        zoneTitleTextHeight: 11
+        zoneTitleTextHeight: 11,
+        zoneTitleBandHeight: titleBandByGap.filter((height) => height > 0)[0] || 0
       }),
       rows,
       columns,

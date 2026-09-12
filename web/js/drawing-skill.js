@@ -8,7 +8,7 @@ window.EVSE_DRAWING_SKILL = (function () {
   'use strict';
 
   const ID = 'EVSE-MODEL-DRAWING-INTEGRITY-SKILL';
-  const VERSION = '3.1.0';
+  const VERSION = '3.3.0';
   const BASIS_STATUS = 'EDEM_V4_AND_GEOMETRY_IR—PROFESSIONAL_REVIEW_REQUIRED';
   const DRAWING_KEY = 'ev-schematic';
   const SOURCE_LIBRARY = Object.freeze([
@@ -17,6 +17,8 @@ window.EVSE_DRAWING_SKILL = (function () {
   ]);
 
   const RULES = Object.freeze([
+    { id: 'ERC-086', group: 'model', enforcement: 'BLOCKING', text: '辅助正极与回流须到达同一物理电源输出对；未映射驱动公共端必须显式待核。' },
+    { id: 'G049', group: 'coverage', enforcement: 'BLOCKING', text: '独立读取最终 SVG 的导线、跳线、端子与符号几何，必须与当前 Drawing IR 完全相符。' },
     { id: 'ERC-001', group: 'model', enforcement: 'BLOCKING', text: '设备、物理端子和受控器件定义必须完整且唯一。' },
     { id: 'ERC-010', group: 'model', enforcement: 'BLOCKING', text: '网络必须引用存在的精确端子，且一个物理端子只能属于一个电气网络。' },
     { id: 'ERC-020', group: 'model', enforcement: 'BLOCKING', text: '网络类别、电气域、相别、极性、电压和协议必须兼容。' },
@@ -56,7 +58,9 @@ window.EVSE_DRAWING_SKILL = (function () {
       erc = { status: 'BLOCKED', blockingCount: 1, checks: [], violations: [{ ruleId: 'ERC-001', code: 'MODEL_MISSING', message: 'EDEM 设计模型缺失。', severity: 'BLOCK' }] };
     } else if (window.EVSE_ERC && typeof window.EVSE_ERC.validate === 'function') {
       erc = window.EVSE_ERC.validate(design);
-      design.modelValidation = erc;
+      /* Initial compilation may cache validation on its still-mutable model;
+         export-time revalidation must also work after EDEM is deep-frozen. */
+      if (!Object.isFrozen(design)) design.modelValidation = erc;
     } else {
       erc = { status: 'BLOCKED', blockingCount: 1, checks: [], violations: [{ ruleId: 'ERC-001', code: 'ERC_MISSING', message: 'EVSE_ERC 未加载。', severity: 'BLOCK' }] };
     }
@@ -64,7 +68,8 @@ window.EVSE_DRAWING_SKILL = (function () {
     (erc.checks || []).forEach((item) => {
       const details = (erc.violations || []).filter((violation) => violation.ruleId === item.ruleId)
         .map((violation) => violation.code + ': ' + violation.message);
-      checks.push(check('EDEM-' + item.ruleId, item.ruleId, item.status === 'PASS', 'ERROR',
+      checks.push(check('EDEM-' + item.ruleId, item.ruleId, item.status === 'PASS',
+        item.status === 'NOT_EVALUATED' ? 'WARN' : 'ERROR',
         item.title + (details.length ? '；' + details.join('；') : '。'), details));
     });
     if (!checks.length && erc.blockingCount) {
@@ -108,10 +113,9 @@ window.EVSE_DRAWING_SKILL = (function () {
       if (result.readiness.release) result.readiness.release.drawingRuleStatus = blocked ? 'BLOCKED—DRAWING_INTEGRITY_FAILED' : 'PASS—CONCEPT_EXPORT_ONLY';
     }
     result.releaseGate = result.readiness && result.readiness.release ? result.readiness.release : result.releaseGate;
-    if (result.design) result.design.drawingSkill = {
-      id: report.id, version: report.version, status: report.status,
-      selectedRuleIds: report.selectedRuleIds.slice(), evaluatedRuleIds: report.evaluatedRuleIds.slice()
-    };
+    /* The authoritative EDEM is immutable after compilation.  Drawing-audit
+       state belongs to result.drawingSkill and must never be written back into
+       the electrical model. */
   }
 
   function apply(result) {
@@ -258,18 +262,22 @@ window.EVSE_DRAWING_SKILL = (function () {
     add('G007-SCHEDULE', 'DOC-001', /设备明细表/.test(text), '图面必须包含由 instances 派生的设备明细表。');
 
     let coverage = null;
+    let currentGeometry = null;
     let irValid = false;
     if (ir && design && IR && typeof IR.auditCoverage === 'function') {
       try {
         coverage = IR.auditCoverage(design, ir);
         if (typeof IR.assertValidDrawingIR === 'function') IR.assertValidDrawingIR(ir);
+        if (typeof IR.analyzeGeometry === 'function') currentGeometry = IR.analyzeGeometry(ir);
         irValid = true;
       } catch (_) { irValid = false; }
     }
     add('G047-MODEL-COVERAGE', 'G047', !!coverage && coverage.ok, 'Drawing IR 必须精确覆盖全部设备、网络、回路及端点。', coverage && coverage.errors || []);
-    add('G043-NO-OVERLAP', 'G043', !!ir && Array.isArray(ir.violations) && !ir.violations.some((item) => item.code === 'ILLEGAL_COLLINEAR_OVERLAP' || item.code === 'ILLEGAL_SELF_CROSSING'), 'Drawing IR 不得有共线重叠或自交。');
-    add('G045-NO-KEEPOUT', 'G045', !!ir && Array.isArray(ir.violations) && !ir.violations.some((item) => item.code === 'ROUTE_KEEP_OUT_INTERSECTION'), 'Drawing IR 导线不得穿过设备 keepout。');
-    add('G046-ROUTER-VALID', 'G046', irValid && (!ir.violations || ir.violations.length === 0), '路由器必须在通道容量内完成无几何违规的确定性布线。', ir && ir.violations || []);
+    const liveViolations = currentGeometry && currentGeometry.violations || [];
+    add('G043-NO-OVERLAP', 'G043', !!currentGeometry && !liveViolations.some((item) => item.code === 'ILLEGAL_COLLINEAR_OVERLAP' || item.code === 'ILLEGAL_SELF_CROSSING'), '闸门执行时重新计算 Drawing IR；不得有共线重叠或自交。');
+    add('G045-NO-KEEPOUT', 'G045', !!currentGeometry && !liveViolations.some((item) => item.code === 'ROUTE_KEEP_OUT_INTERSECTION'), '闸门执行时重新计算 Drawing IR；导线不得穿过设备 keepout。');
+    add('G046-ROUTER-VALID', 'G046', irValid && !!currentGeometry && currentGeometry.ok === true,
+      '路由器必须在通道容量内完成无几何违规的确定性布线。', liveViolations);
 
     const markers = ir && Array.isArray(ir.markers) ? ir.markers : [];
     const bridges = markers.filter((marker) => marker.type === 'bridge');
@@ -316,11 +324,19 @@ window.EVSE_DRAWING_SKILL = (function () {
     if (ir && IR && typeof IR.drawingIRHash === 'function') expectedHash = IR.drawingIRHash(ir);
     add('G008-GEOMETRY-HASH', 'DOC-002', !!expectedHash && attrPresent(text, 'data-geometry-hash', expectedHash), 'SVG 必须携带与 Drawing IR 一致的几何哈希。');
 
+    const renderedAuditor = window.EVSE_RENDERED_SVG_AUDIT;
+    const renderedGeometry = renderedAuditor && typeof renderedAuditor.audit === 'function'
+      ? renderedAuditor.audit(text, ir, window.SYM && window.SYM.C || {})
+      : { ok: false, errors: [{ code: 'RENDERED_SVG_AUDITOR_MISSING' }] };
+    add('G049-RENDERED-SVG', 'G049', renderedGeometry.ok === true,
+      '独立读取最终 SVG 的真实导线、跨线、端子、符号与页面骨架，并与 Drawing IR 逐项核对。',
+      renderedGeometry.errors || []);
+
     const blocking = checks.filter((item) => !item.ok && item.severity === 'ERROR');
     return {
       drawingKey, profile: profile.id, status: blocking.length ? 'BLOCKED' : 'CHECKED', checks,
       blockingCount: blocking.length, evaluatedRuleIds: unique(checks.map((item) => item.ruleId)),
-      coverage, geometryHash: expectedHash || null
+      coverage, currentGeometry, renderedGeometry, geometryHash: expectedHash || null
     };
   }
 
@@ -350,10 +366,21 @@ window.EVSE_DRAWING_SKILL = (function () {
     return result;
   }
 
-  function canExport(result, drawingKey, format) {
+  function canExport(result, drawingKey, format, currentMarkup) {
     const report = result && result.drawingSkill;
     if (!report) return { allowed: false, reason: '绘图完整性报告缺失，禁止导出。', format };
     if (Number(report.graphValidation && report.graphValidation.blockingCount || 0) > 0) return { allowed: false, reason: '端子级 ERC 存在阻断项，禁止导出。', format };
+    const freshGraph = validateGraph(result);
+    if (Number(freshGraph.blockingCount || 0) > 0) return { allowed: false, reason: '导出时重新执行的端子级 ERC 存在阻断项。', format };
+    if (currentMarkup != null) {
+      const freshAudit = auditMarkup(String(currentMarkup), drawingKey, result);
+      if (Number(freshAudit.blockingCount || 0) > 0) return {
+        allowed: false,
+        reason: '导出时重新读取最终 SVG，发现其与当前 Drawing IR 不一致。',
+        format,
+        audit: freshAudit
+      };
+    }
     const audit = report.drawingAudits && report.drawingAudits[drawingKey];
     if (!audit) return { allowed: false, reason: '当前图纸尚未执行图模一致性审计，禁止导出。', format };
     if (Number(audit.blockingCount || 0) > 0 || Number(report.renderBlockingCount || 0) > 0) return { allowed: false, reason: 'Drawing IR/SVG 图模一致性审计未通过，禁止导出。', format };

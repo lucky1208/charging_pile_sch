@@ -48,6 +48,7 @@
     Object.freeze({ id: 'EVSE-EQPT', purpose: 'equipment' }),
     Object.freeze({ id: 'EVSE-AC', purpose: 'power-ac' }),
     Object.freeze({ id: 'EVSE-DC', purpose: 'power-dc' }),
+    Object.freeze({ id: 'EVSE-ESS', purpose: 'energy-storage-dc' }),
     Object.freeze({ id: 'EVSE-AUX', purpose: 'auxiliary-power' }),
     Object.freeze({ id: 'EVSE-CTL', purpose: 'control' }),
     Object.freeze({ id: 'EVSE-COMM', purpose: 'communication' }),
@@ -1053,6 +1054,12 @@
   }
 
   function routePrimitive(route) {
+    /* A sheet projection may terminate graphically at an off-page connector,
+       but its engineering identity is always the original EDEM pin-to-pin
+       circuit. Keep both identities so every export format can be audited. */
+    const globalSource = route.globalSource || route.source;
+    const globalTarget = route.globalTarget || route.target;
+    const offPage = route.offPageConnector || null;
     return {
       id: 'ROUTE:' + route.id,
       kind: 'polyline',
@@ -1065,10 +1072,17 @@
       polarity: route.polarity,
       phase: route.phase,
       protocol: route.protocol,
-      from: route.source.ref,
-      to: route.target.ref,
-      physicalFrom: route.source.physicalRef || route.source.ref,
-      physicalTo: route.target.physicalRef || route.target.ref,
+      from: globalSource.ref,
+      to: globalTarget.ref,
+      physicalFrom: globalSource.physicalRef || globalSource.ref,
+      physicalTo: globalTarget.physicalRef || globalTarget.ref,
+      graphicalFrom: route.source.ref,
+      graphicalTo: route.target.ref,
+      offPageConnectorId: offPage && offPage.id || '',
+      xrefSheet: offPage && offPage.remoteSheetId || '',
+      xrefPage: offPage && offPage.xref && offPage.xref.page || '',
+      xrefDrawingNo: offPage && offPage.xref && offPage.xref.drawingNo || '',
+      xrefEndpoint: offPage && offPage.xref && offPage.xref.endpointKey || '',
       points: route.points.map((p) => ({ x: p.x, y: p.y }))
     };
   }

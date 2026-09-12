@@ -117,13 +117,21 @@
   }
 
   function normalizeRoute(route, points) {
-    return IR.routeOrthogonal({
+    const normalized = IR.routeOrthogonal({
       id: route.id, netId: route.netId, circuitId: route.circuitId,
       netClass: route.netClass, domain: route.domain, polarity: route.polarity, phase: route.phase,
       protocol: route.protocol, source: route.source, target: route.target,
       points: points || route.points, layer: route.layer,
       bridgePriority: route.bridgePriority, style: route.style
     });
+    /* Page routing is graphical, but globalSource/globalTarget and the
+       paired connector are the cross-sheet engineering trace. A geometry
+       edit must never strip that trace from either planned or fixed routes. */
+    return Object.freeze(Object.assign({}, normalized, {
+      globalSource: route.globalSource ? Object.freeze(clone(route.globalSource)) : undefined,
+      globalTarget: route.globalTarget ? Object.freeze(clone(route.globalTarget)) : undefined,
+      offPageConnector: route.offPageConnector ? Object.freeze(clone(route.offPageConnector)) : null
+    }));
   }
 
   function deviceObstacles(devices, clearance) {

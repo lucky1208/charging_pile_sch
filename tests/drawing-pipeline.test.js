@@ -69,7 +69,17 @@ test('drawPile compiles exact design collections and SVG carries trace attribute
   assert.match(svg, /data-equipment="SRC"/);
   assert.match(svg, /data-net="N1"/);
   assert.match(svg, /data-circuit="C1"/);
+  assert.match(svg, /data-layer="EVSE-CTL"/);
+  assert.match(svg, /stroke-dasharray="8 4"/);
+  const routeSegmentCount = R.drawingIR.routes.reduce((sum, route) => sum + route.segments.length, 0);
+  assert.equal((svg.match(/data-editor-hit-target="true"/g) || []).length, routeSegmentCount,
+    'every orthogonal segment has one non-scaling editor hit target');
+  assert.match(svg, /class="editor-route-hit-target"[^>]*stroke="transparent"[^>]*stroke-width="12"[^>]*pointer-events="stroke"[^>]*vector-effect="non-scaling-stroke"/);
+  assert.match(svg, /<g id="ROUTE-C1"[^>]*role="button"[^>]*tabindex="0"[^>]*aria-label="导线 C1，SRC:OUT1 到 LOCK1:DRIVE"/);
   assert.equal(R.drawingIR.coverage.ok, true);
+  const declaredLayers = new Set(R.drawingIR.layers.map((layer) => layer.id));
+  R.drawingIR.routes.forEach((route) => assert.ok(declaredLayers.has(route.layer), 'route layer is declared: ' + route.layer));
+  assert.ok(declaredLayers.has('EVSE-ESS'), 'ESS layer is declared even when the current page does not use it');
   assert.equal(R.drawingIR.routes.length, R.design.circuits.length);
   assert.equal(R.drawingGeometryHash, win.EVSE_DRAWING_IR.drawingIRHash(R.drawingIR));
   R.design.circuits.forEach((circuit) => {

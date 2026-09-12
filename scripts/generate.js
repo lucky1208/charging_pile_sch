@@ -5,14 +5,13 @@
  * 用法（Windows PowerShell 下请用参数文件，避免引号被吞）:
  *   node scripts\generate.js --params params.json [--out <输出目录>] [--name <文件名前缀>]
  *
- * 流程与浏览器端 app.js 完全一致：
- *   1. EVSE_ENGINE.build(params)                 确定性选型 + 工程模型 + 语义图校验
- *   2. drawPile(R)                               渲染自动选幅 SVG
- *   3. EVSE_DRAWING_SKILL.auditMarkup(...)       渲染规则校验（sch_lib 规则包）
- *      recordDrawingAudit + finalizeDrawingAudits
- *   4. canExport 闸门（fail-closed）              不通过则不写 SVG/DXF
- *   5. EVSE_DXF.exportDrawingIR(R.drawingIR)     R2010 DXF 概念草图
- *   6. JSON 方案包（EVSE-SOLUTION-PACKAGE/1.0）
+ * 流程与浏览器端 app.js 使用同一个多页编译入口：
+ *   1. EVSE_ENGINE.build(params)                       唯一 EDEM 真值
+ *   2. EVSE_SCHEMATIC_SHEET_RENDERING.buildDocument   六页投影 + 精确跨页连接
+ *   3. projectGate                                    页/项目 fail-closed 闸门
+ *   4. 每页 Drawing IR 直接导出 SVG 与 DXF            不反解析 SVG
+ *   5. 工程交付表：BOM / 精确 PIN 接线 / RFQ 澄清 / 审计证据
+ *   6. JSON 图册方案包（SCHEMATICFORGE-DIAGNOSTIC-PACKAGE/2.0）
  *
  * 退出码: 0 成功；1 参数/运行错误；2 绘图规则闸门阻断（不产出图纸）
  * ============================================================ */
@@ -51,7 +50,7 @@ const HELP = [
   '  moduleKw(15|20|30|40|60) voltageWindow thermal(air|liquid)',
   '  essEnabled essKwh essPowerKw essChem(lfp|nmc) essCoupling(dc|ac)',
   '输出目录: --out 未提供时使用当前工作目录',
-  '输出文件: <name>.svg + <name>.dxf + <name>.json'
+  '输出文件: <name>_EVSE-01..06.svg/.dxf + <name>_BOM/_WIRING/_RFQ.csv + <name>_AUDIT.json + <name>.json'
 ].join('\n');
 
 const args = parseArgs(process.argv.slice(2));
@@ -110,136 +109,122 @@ try {
   fail('选型引擎计算失败: ' + e.message);
 }
 
-/* ---------- 2. 渲染 SVG ---------- */
-let svg = '';
-let renderError = null;
-if (typeof win.drawPile === 'function') {
-  try {
-    svg = win.drawPile(R);
-  } catch (e) {
-    renderError = e.message;
-  }
+/* ---------- 2. 六页图册编译与项目闸门 ---------- */
+const sheetRenderer = win.EVSE_SCHEMATIC_SHEET_RENDERING || win.SCHEMATIC_FORGE_SHEET_RENDERING;
+if (!sheetRenderer || typeof sheetRenderer.buildDocument !== 'function') {
+  fail('多 Sheet 编译器未加载；禁止退回旧单页渲染。', 2);
 }
-
-/* ---------- 3. 渲染规则校验（与 app.js renderDrawing 同序） ---------- */
-if (SKILL && typeof SKILL.recordDrawingAudit === 'function') {
-  if (svg && typeof SKILL.auditMarkup === 'function') {
-    SKILL.recordDrawingAudit(R, DRAWING_KEY, SKILL.auditMarkup(svg, DRAWING_KEY, R));
-  } else {
-    SKILL.recordDrawingAudit(R, DRAWING_KEY, {
-      drawingKey: DRAWING_KEY, status: 'BLOCKED', blockingCount: 1, evaluatedRuleIds: ['DOC-001'],
-      checks: [{ code: 'G000-RENDER-ERROR', ok: false, severity: 'ERROR', detail: renderError || '渲染器未加载或无 SVG 输出。' }]
-    });
-  }
+let renderedDocument;
+try {
+  renderedDocument = sheetRenderer.buildDocument(R);
+} catch (error) {
+  fail('多 Sheet 编译失败: ' + error.message, 2);
 }
-if (SKILL && typeof SKILL.finalizeDrawingAudits === 'function') SKILL.finalizeDrawingAudits(R);
-
 const skill = R.drawingSkill || {};
 const graph = skill.graphValidation || {};
 const blocking = Number(graph.blockingCount || 0);
+const projectGate = renderedDocument.projectGate || { status: 'BLOCKED', allowed: false };
+const pageBlocked = renderedDocument.pages.some((page) => !page.pageGate || page.pageGate.allowed !== true);
+const projectAllowed = blocking === 0 && projectGate.status !== 'BLOCKED' && !pageBlocked;
+const gateSvg = { allowed: projectAllowed,
+  reason: projectAllowed ? '六页图册、跨页连接、Drawing IR 和项目闸门通过。' : '多 Sheet 项目闸门未通过。' };
+const gateDxf = Object.assign({}, gateSvg);
 
-/* ---------- 4. 导出闸门（fail-closed） ---------- */
-const gateSvg = SKILL && typeof SKILL.canExport === 'function'
-  ? SKILL.canExport(R, DRAWING_KEY, 'SVG')
-  : { allowed: false, reason: '绘图规则包未加载，禁止导出。' };
-const gateDxf = SKILL && typeof SKILL.canExport === 'function'
-  ? SKILL.canExport(R, DRAWING_KEY, 'DXF')
-  : { allowed: false, reason: '绘图规则包未加载，禁止导出。' };
-
-/* ---------- 审计戳记（与 app.js stampAudit 等效，作用于 SVG 字符串） ---------- */
-function stampSvg(markup) {
-  const report = R.drawingSkill || {};
-  const audit = (report.drawingAudits || {})[DRAWING_KEY] || {};
-  const meta = typeof SKILL.metadata === 'function' ? SKILL.metadata(R, DRAWING_KEY) : {};
-  /* 与浏览器端 setAttribute 等效：根标签已有的属性覆盖、没有的新增，
-   * 避免重复属性导致 XML 解析失败（symbols.js 已预写 skill-status/evaluated-rules）。 */
-  const gt = markup.indexOf('>');
-  if (gt === -1) return markup;
-  let rootTag = markup.slice(0, gt);
-  const setRootAttr = (name, value) => {
-    const re = new RegExp('\\s' + name + '\\s*=\\s*"[^"]*"');
-    rootTag = re.test(rootTag)
-      ? rootTag.replace(re, ' ' + name + '="' + value + '"')
-      : rootTag + ' ' + name + '="' + value + '"';
-  };
-  setRootAttr('data-drawing-audit-status', audit.status || 'BLOCKED');
-  setRootAttr('data-drawing-skill-status', report.status || 'BLOCKED');
-  setRootAttr('data-evaluated-rules', (meta.evaluatedRuleIds || []).join(','));
-  let out = rootTag + markup.slice(gt);
-  out = out.replace(/<metadata>([\s\S]*?)<\/metadata>/, (m, inner) => {
-    try {
-      const documentMeta = JSON.parse(inner);
-      documentMeta.drawingSkill = Object.assign({}, documentMeta.drawingSkill || {}, meta, {
-        status: report.status || 'BLOCKED',
-        auditStatus: audit.status || 'BLOCKED',
-        auditVersion: SKILL.VERSION || ''
-      });
-      return '<metadata>' + JSON.stringify(documentMeta) + '</metadata>';
-    } catch (e) {
-      return m;
-    }
-  });
-  return out;
-}
-
-/* ---------- 5. 输出 ---------- */
+/* ---------- 3. 每页 SVG / DXF 直接输出 ---------- */
 const outDir = path.resolve(args.out || '.');
 fs.mkdirSync(outDir, { recursive: true });
 const safeName = String(args.name || ((R.pileName || '充电桩') + '_电气原理图')).replace(/[\\/:*?"<>|]/g, '_');
 
-const files = {};
-const packageExtras = { dxfWarnings: [], dxfStats: null };
-if (gateSvg.allowed && svg) {
-  const stamped = stampSvg(svg);
-  files.svg = safeName + '.svg';
-  fs.writeFileSync(path.join(outDir, files.svg), '<?xml version="1.0" encoding="UTF-8"?>\n' + stamped, 'utf8');
-
-  if (gateDxf.allowed && win.EVSE_DXF) {
+const files = { pages: [] };
+if (projectAllowed) {
+  renderedDocument.pages.forEach((page) => {
+    const drawingNo = String(page.sheet && page.sheet.drawingNo || page.sheetId).replace(/[^A-Za-z0-9_.-]/g, '_');
+    const entry = { sheetId: page.sheetId, drawingNo, svg: safeName + '_' + drawingNo + '.svg', dxf: null,
+      drawingIRHash: page.geometryHash, pageGate: page.pageGate.status };
+    fs.writeFileSync(path.join(outDir, entry.svg), '<?xml version="1.0" encoding="UTF-8"?>\n' + page.svg, 'utf8');
+    if (win.EVSE_DXF && typeof win.EVSE_DXF.exportDrawingIR === 'function') {
     const dxfOptions = {
-      title: safeName,
+        title: safeName + '_' + drawingNo,
       drawing: DRAWING_KEY,
       project: R.pileName,
       documentStatus: R.documentStatus,
+        drawingIRHash: page.geometryHash,
       notice: '可编辑 DXF 概念草图；复杂符号、图层、线宽、比例和打印样式须在 CAD 模板中复核。'
     };
-    if (!R.drawingIR || typeof win.EVSE_DXF.exportDrawingIR !== 'function') {
-      fail('Drawing IR 缺失或直接 DXF 导出器未加载；禁止从 SVG 反向猜测几何。', 2);
-    }
-    const dxfResult = win.EVSE_DXF.exportDrawingIR(R.drawingIR, dxfOptions);
+      const dxfResult = win.EVSE_DXF.exportDrawingIR(page.compiled.drawingIR, dxfOptions);
     const dxf = dxfResult && (dxfResult.dxf || dxfResult.text);
-    if (dxf && /^\s*0\s*[\r\n]+SECTION/m.test(dxf)) {
-      files.dxf = safeName + '.dxf';
-      fs.writeFileSync(path.join(outDir, files.dxf), dxf, 'utf8');
-      packageExtras.dxfWarnings = Array.isArray(dxfResult.warnings) ? dxfResult.warnings : [];
-      packageExtras.dxfStats = dxfResult.stats || null;
+      if (!dxf || !/^\s*0\s*[\r\n]+SECTION/m.test(dxf)) fail('页面 ' + page.sheetId + ' 的 DXF 结果无效。', 2);
+      const dxfAuditor = win.EVSE_RENDERED_DXF_AUDIT;
+      const dxfAudit = dxfAuditor && typeof dxfAuditor.audit === 'function'
+        ? dxfAuditor.audit(dxf, page.compiled.drawingIR)
+        : { ok: false, errors: [{ code: 'DXF_READBACK_AUDITOR_MISSING' }] };
+      if (!dxfAudit.ok) fail('页面 ' + page.sheetId + ' 的最终 DXF 反读审计未通过：' +
+        (dxfAudit.errors || []).slice(0, 5).map((item) => item.code + ':' + item.id).join(', '), 2);
+      entry.dxf = safeName + '_' + drawingNo + '.dxf';
+      entry.dxfWarnings = Array.isArray(dxfResult.warnings) ? dxfResult.warnings : [];
+      entry.dxfStats = dxfResult.stats || null;
+      entry.dxfReadbackAudit = dxfAudit;
+      fs.writeFileSync(path.join(outDir, entry.dxf), dxf, 'utf8');
     }
-  }
+    files.pages.push(entry);
+  });
 }
 
-/* ---------- 6. JSON 方案包 ---------- */
+/* ---------- 4. JSON 图册方案包 ---------- */
+const engineeringBom = win.SCHEMATIC_ENGINEERING_BOM && typeof win.SCHEMATIC_ENGINEERING_BOM.build === 'function'
+  ? win.SCHEMATIC_ENGINEERING_BOM.build(R) : null;
+const delivery = win.SCHEMATIC_ENGINEERING_DELIVERY || win.EVSE_ENGINEERING_DELIVERY;
+if (!delivery || typeof delivery.wiringCsv !== 'function' || typeof delivery.auditJson !== 'function') {
+  fail('工程交付导出模块未加载，不能生成可追溯 PIN 接线表与审计证据。', 2);
+}
+files.bom = safeName + '_BOM.csv';
+files.wiring = safeName + '_WIRING.csv';
+files.rfq = safeName + '_RFQ.csv';
+files.audit = safeName + '_AUDIT.json';
+fs.writeFileSync(path.join(outDir, files.bom), delivery.bomCsv(engineeringBom), 'utf8');
+fs.writeFileSync(path.join(outDir, files.wiring), delivery.wiringCsv(R), 'utf8');
+fs.writeFileSync(path.join(outDir, files.rfq), delivery.rfqCsv(R), 'utf8');
+const deliveryDocument = Object.assign({}, renderedDocument, {
+  pages: renderedDocument.pages.map((page) => {
+    const file = files.pages.find((entry) => entry.sheetId === page.sheetId);
+    return Object.assign({}, page, { dxfReadbackAudit: file && file.dxfReadbackAudit || null });
+  })
+});
+fs.writeFileSync(path.join(outDir, files.audit), delivery.auditJson(R, deliveryDocument), 'utf8');
 const packageData = {
-  schema: 'EVSE-SOLUTION-PACKAGE/1.0',
+  schema: 'SCHEMATICFORGE-DIAGNOSTIC-PACKAGE/2.0',
   exportedAt: new Date().toISOString(),
   documentStatus: R.documentStatus,
   notice: '方案级自动原理图；不构成生产图、施工图、标准符合性证明、型式试验结论或设备报价。',
   releaseGate: R.releaseGate || (R.readiness && R.readiness.release) || { constructionDrawingAllowed: false },
-  drawingGeometryHash: R.drawingGeometryHash || null,
-  drawingIR: R.drawingIR || null,
+  sourceModelHash: R.design && R.design.modelHash || null,
+  schematicDocument: renderedDocument.document,
+  renderedPageManifest: renderedDocument.pages.map((page) => ({
+    sheetId: page.sheetId, drawingNo: page.sheet && page.sheet.drawingNo,
+    geometryHash: page.geometryHash, projectionHash: page.projectionHash,
+    pageGate: page.pageGate, svg: files.pages.find((entry) => entry.sheetId === page.sheetId)?.svg || null,
+    dxf: files.pages.find((entry) => entry.sheetId === page.sheetId)?.dxf || null,
+    dxfReadbackAudit: files.pages.find((entry) => entry.sheetId === page.sheetId)?.dxfReadbackAudit || null
+  })),
+  engineeringBom,
+  engineeringDelivery: {
+    bom: files.bom,
+    exactPinWiring: files.wiring,
+    rfqClarifications: files.rfq,
+    auditEvidence: files.audit,
+    candidateStatus: delivery.CANDIDATE_STATUS,
+    approvalStatus: delivery.APPROVAL_STATUS
+  },
   drawingSkill: {
     id: skill.id || null,
     version: skill.version || null,
     status: skill.status || null,
     blockingCount: blocking,
-    renderBlockingCount: Number(skill.renderBlockingCount || 0),
+    renderBlockingCount: renderedDocument.pages.reduce((sum, page) => sum + Number(page.pageGate && page.pageGate.quality && page.pageGate.quality.blockingCount || 0), 0),
     evaluatedRules: (skill.evaluatedRuleIds || []).length
   },
-  exports: {
-    svg: files.svg || null,
-    dxf: files.dxf || null,
-    dxfWarnings: packageExtras.dxfWarnings,
-    dxfStats: packageExtras.dxfStats
-  },
-  gates: { svg: gateSvg, dxf: gateDxf },
+  exports: { pages: files.pages, bom: files.bom, wiring: files.wiring, rfq: files.rfq, audit: files.audit },
+  gates: { svg: gateSvg, dxf: gateDxf, project: projectGate },
   model: R
 };
 files.json = safeName + '.json';
@@ -263,15 +248,19 @@ const lines = [
   '充电枪: ' + (R.guns || []).length + ' × ' + params.gunCurrentA + 'A | 输出窗口 ' + (dc.outputRangeText || params.voltageWindow),
   '储能: ' + (get(R, 'ess.enabled', false) ? (get(R, 'ess.installedKwh', '?') + 'kWh / 变换器 ' + get(R, 'ess.converterInstalledKw', '?') + 'kW / ' + get(R, 'ess.couplingName', params.essCoupling)) : '无'),
   '语义图阻断项: ' + blocking + ' | 渲染阻断项: ' + Number(skill.renderBlockingCount || 0),
-  'SVG 闸门: ' + (gateSvg.allowed ? '通过' : '阻断(' + gateSvg.reason + ')') + ' | DXF 闸门: ' + (gateDxf.allowed ? '通过' : '阻断(' + gateDxf.reason + ')')
+  '项目图册闸门: ' + projectGate.status + ' | SVG: ' + (gateSvg.allowed ? '通过' : '阻断') + ' | DXF: ' + (gateDxf.allowed ? '通过' : '阻断')
 ];
-if (packageExtras.dxfWarnings.length) lines.push('DXF 转换提示: ' + packageExtras.dxfWarnings.join('；'));
 lines.push('输出目录: ' + outDir);
-Object.keys(files).forEach((k) => lines.push('  - ' + k.toUpperCase() + ': ' + files[k]));
+files.pages.forEach((page) => lines.push('  - ' + page.sheetId + ': ' + page.svg + (page.dxf ? ' + ' + page.dxf : '')));
+lines.push('  - JSON: ' + files.json);
+lines.push('  - 工程 BOM: ' + files.bom);
+lines.push('  - 精确 PIN 接线表: ' + files.wiring);
+lines.push('  - RFQ 澄清表: ' + files.rfq);
+lines.push('  - 审计证据: ' + files.audit);
 lines.push('====================================================');
 console.log(lines.join('\n'));
 
-if (!gateSvg.allowed || !gateDxf.allowed || blocking > 0) {
+if (!projectAllowed) {
   console.error('[evse-schematic-design] 闸门阻断，未完整产出 SVG/DXF；原因见 JSON 方案包 gates 字段。');
   process.exit(2);
 }

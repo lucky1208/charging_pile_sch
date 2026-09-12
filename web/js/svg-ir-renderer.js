@@ -13,7 +13,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.3.0';
 
   class SvgIRRenderError extends Error {
     constructor(code, message, details) {
@@ -33,7 +33,11 @@
   function number(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) throw new SvgIRRenderError('INVALID_COORDINATE', 'SVG coordinate must be finite.', { value });
-    return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(4)));
+    /* Four decimals can collapse a legitimate, adaptively shortened bridge
+       into a zero-length path when crossings are very close.  Nine decimals
+       preserves deterministic topology while staying well inside SVG/CAD
+       numeric precision. */
+    return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(9)));
   }
 
   function attr(S, value) {
@@ -42,26 +46,58 @@
 
   function layerStyle(layer, C) {
     const styles = {
-      'EVSE-AC': { color: C.ac, width: 1.8 },
-      'EVSE-DC': { color: C.dc, width: 1.8 },
-      'EVSE-ESS': { color: C.ess, width: 1.8 },
-      'EVSE-AUX': { color: C.aux, width: 1.45 },
-      'EVSE-CTL': { color: C.ctl, width: 1.2 },
-      'EVSE-COMM': { color: C.comm, width: 1.2 },
-      'EVSE-PE': { color: C.pe, width: 1.8 }
+      'EVSE-AC': { color: C.ac, width: 2.4 },
+      'EVSE-DC': { color: C.dc, width: 2.4 },
+      'EVSE-ESS': { color: C.ess, width: 2.4 },
+      'EVSE-AUX': { color: C.aux, width: 1.7 },
+      'EVSE-CTL': { color: C.ctl, width: 1.25, dash: '8 4' },
+      'EVSE-COMM': { color: C.comm, width: 1.25, dash: '2.5 3' },
+      'EVSE-PE': { color: C.pe, width: 2.6 }
     };
     return styles[layer] || { color: C.ink, width: 1.2 };
   }
 
   function routeAttributes(S, route) {
+    const globalSource = route.globalSource || route.source;
+    const globalTarget = route.globalTarget || route.target;
+    const offPage = route.offPageConnector || null;
     return ' data-route="' + attr(S, route.id) + '"' +
       ' data-net="' + attr(S, route.netId) + '"' +
       ' data-circuit="' + attr(S, route.circuitId) + '"' +
-      ' data-from="' + attr(S, route.source.ref) + '"' +
-      ' data-to="' + attr(S, route.target.ref) + '"' +
-      ' data-physical-from="' + attr(S, route.source.physicalRef || route.source.ref) + '"' +
-      ' data-physical-to="' + attr(S, route.target.physicalRef || route.target.ref) + '"' +
+      ' data-from="' + attr(S, globalSource.ref) + '"' +
+      ' data-to="' + attr(S, globalTarget.ref) + '"' +
+      ' data-physical-from="' + attr(S, globalSource.physicalRef || globalSource.ref) + '"' +
+      ' data-physical-to="' + attr(S, globalTarget.physicalRef || globalTarget.ref) + '"' +
+      ' data-graphical-from="' + attr(S, route.source.ref) + '"' +
+      ' data-graphical-to="' + attr(S, route.target.ref) + '"' +
+      (offPage ? ' data-off-page-connector="' + attr(S, offPage.id) + '"' +
+        ' data-off-page-role="' + attr(S, offPage.role) + '"' +
+        ' data-xref-sheet="' + attr(S, offPage.remoteSheetId) + '"' +
+        ' data-xref-page="' + attr(S, offPage.xref && offPage.xref.page) + '"' +
+        ' data-xref-drawing-no="' + attr(S, offPage.xref && offPage.xref.drawingNo) + '"' +
+        ' data-xref-endpoint="' + attr(S, offPage.xref && offPage.xref.endpointKey) + '"' : '') +
       ' data-layer="' + attr(S, route.layer) + '"';
+  }
+
+  function renderOffPageMetadata(S, connectors) {
+    const values = (Array.isArray(connectors) ? connectors : []).slice()
+      .sort((a, b) => compareText(a.id, b.id));
+    let out = '<metadata id="EVSE-OFF-PAGE-CONNECTORS" data-count="' + number(values.length) + '">';
+    values.forEach((connector) => {
+      out += '<metadata id="XREF-' + attr(S, connector.id) + '"' +
+        ' data-off-page-connector="' + attr(S, connector.id) + '"' +
+        ' data-peer-connector="' + attr(S, connector.peerConnectorId) + '"' +
+        ' data-circuit="' + attr(S, connector.circuitId) + '"' +
+        ' data-net="' + attr(S, connector.netId) + '"' +
+        ' data-from="' + attr(S, connector.from && connector.from.endpointKey) + '"' +
+        ' data-to="' + attr(S, connector.to && connector.to.endpointKey) + '"' +
+        ' data-local-sheet="' + attr(S, connector.localSheetId) + '"' +
+        ' data-remote-sheet="' + attr(S, connector.remoteSheetId) + '"' +
+        ' data-remote-page="' + attr(S, connector.xref && connector.xref.page) + '"' +
+        ' data-remote-drawing-no="' + attr(S, connector.xref && connector.xref.drawingNo) + '"' +
+        ' data-remote-endpoint="' + attr(S, connector.xref && connector.xref.endpointKey) + '"/>';
+    });
+    return out + '</metadata>';
   }
 
   function renderAliasTraces(S, ir) {
@@ -86,7 +122,17 @@
     return '<line x1="' + number(x1) + '" y1="' + number(y1) +
       '" x2="' + number(x2) + '" y2="' + number(y2) +
       '" stroke="' + style.color + '" stroke-width="' + number(style.width) +
-      '" stroke-linecap="round"' + routeAttributes(S, route) + '/>';
+      '" stroke-linecap="round"' + (style.dash ? ' stroke-dasharray="' + attr(S, style.dash) + '"' : '') +
+      routeAttributes(S, route) + '/>';
+  }
+
+  function routeHitElement(S, route, segment) {
+    if (Math.abs(segment.x1 - segment.x2) < 1e-9 && Math.abs(segment.y1 - segment.y2) < 1e-9) return '';
+    return '<line class="editor-route-hit-target" data-editor-hit-target="true"' +
+      ' x1="' + number(segment.x1) + '" y1="' + number(segment.y1) +
+      '" x2="' + number(segment.x2) + '" y2="' + number(segment.y2) +
+      '" stroke="transparent" stroke-width="12" fill="none" pointer-events="stroke"' +
+      ' vector-effect="non-scaling-stroke" aria-hidden="true"/>';
   }
 
   function indexRouteEvents(ir) {
@@ -111,7 +157,22 @@
         : Math.abs(marker.x - segment.x1) < 1e-9 && marker.y > Math.min(segment.y1, segment.y2) && marker.y < Math.max(segment.y1, segment.y2)))
       .sort((a, b) => segment.orientation === 'horizontal' ? a.x - b.x : a.y - b.y);
     if (!events.length) return lineElement(S, route, style, segment.x1, segment.y1, segment.x2, segment.y2);
-    const radius = 3;
+    /* Keep every bridge centred on the actual global crossing.  Nearby
+       crossings/junctions reduce the radius deterministically, preventing a
+       fixed 3-unit arc from consuming or reversing its neighbouring piece. */
+    const bridgeRadius = (marker, horizontal, low, high) => {
+      const at = horizontal ? marker.x : marker.y;
+      let radius = Math.min(3, at - low, high - at);
+      events.forEach((other) => {
+        const distance = Math.abs(at - (horizontal ? other.x : other.y));
+        if (distance > 1e-8) radius = Math.min(radius, distance / 2);
+      });
+      if (!(radius > 0)) throw new SvgIRRenderError('BRIDGE_RADIUS_INVALID',
+        'A crossing could not be rendered as a positive-radius bridge.', {
+          routeId: route.id, marker, segment
+        });
+      return radius;
+    };
     let out = '';
     if (segment.orientation === 'horizontal') {
       const start = Math.min(segment.x1, segment.x2);
@@ -123,12 +184,14 @@
           cursor = marker.x;
           return;
         }
-        const left = Math.max(cursor, marker.x - radius);
-        const right = Math.min(end, marker.x + radius);
+        const radius = bridgeRadius(marker, true, start, end);
+        const left = marker.x - radius;
+        const right = marker.x + radius;
         out += lineElement(S, route, style, cursor, segment.y1, left, segment.y1);
         out += '<path d="M' + number(left) + ',' + number(segment.y1) + ' A' + radius + ',' + radius +
           ' 0 0,1 ' + number(right) + ',' + number(segment.y1) + '" fill="none" stroke="' + style.color +
-          '" stroke-width="' + number(style.width) + '"' + routeAttributes(S, route) +
+          '" stroke-width="' + number(style.width) + '"' +
+          (style.dash ? ' stroke-dasharray="' + attr(S, style.dash) + '"' : '') + routeAttributes(S, route) +
           ' data-marker="bridge"/>';
         cursor = right;
       });
@@ -143,12 +206,14 @@
           cursor = marker.y;
           return;
         }
-        const top = Math.max(cursor, marker.y - radius);
-        const bottom = Math.min(end, marker.y + radius);
+        const radius = bridgeRadius(marker, false, start, end);
+        const top = marker.y - radius;
+        const bottom = marker.y + radius;
         out += lineElement(S, route, style, segment.x1, cursor, segment.x1, top);
         out += '<path d="M' + number(segment.x1) + ',' + number(top) + ' A' + radius + ',' + radius +
           ' 0 0,1 ' + number(segment.x1) + ',' + number(bottom) + '" fill="none" stroke="' + style.color +
-          '" stroke-width="' + number(style.width) + '"' + routeAttributes(S, route) +
+          '" stroke-width="' + number(style.width) + '"' +
+          (style.dash ? ' stroke-dasharray="' + attr(S, style.dash) + '"' : '') + routeAttributes(S, route) +
           ' data-marker="bridge"/>';
         cursor = bottom;
       });
@@ -162,9 +227,14 @@
     const eventsByRoute = indexRouteEvents(ir);
     (ir.routes || []).slice().sort((a, b) => compareText(a.id, b.id)).forEach((route) => {
       const style = layerStyle(route.layer, S.C);
-      out += '<g id="ROUTE-' + attr(S, route.id) + '"' + routeAttributes(S, route) + '>';
+      out += '<g id="ROUTE-' + attr(S, route.id) + '"' + routeAttributes(S, route) +
+        ' role="button" tabindex="0" aria-label="导线 ' + attr(S, route.id + '，' +
+          (route.globalSource || route.source).ref + ' 到 ' + (route.globalTarget || route.target).ref) + '">';
       const routeEvents = eventsByRoute.get(route.id) || [];
-      route.segments.forEach((segment) => { out += renderSegment(S, route, segment, style, routeEvents); });
+      route.segments.forEach((segment) => {
+        out += routeHitElement(S, route, segment);
+        out += renderSegment(S, route, segment, style, routeEvents);
+      });
       out += '</g>';
     });
     out += '</g>';
@@ -264,7 +334,13 @@
   function renderDevice(S, device, primitives) {
     let out = '<g id="DEVICE-' + attr(S, device.id) + '" data-equipment="' + attr(S, device.id) +
       '" data-device-kind="' + attr(S, device.type) + '" data-symbol="' + attr(S, device.symbolId) +
-      '" data-symbol-fallback="' + (device.symbolFallback ? 'true' : 'false') + '" data-layer="EVSE-EQPT">';
+      '" data-symbol-fallback="' + (device.symbolFallback ? 'true' : 'false') +
+      '" data-model-instance="' + attr(S, device.modelInstanceId || device.id) +
+      '" data-graphical-representation-of="' + attr(S, device.graphicalRepresentationOf || device.modelInstanceId || device.id) +
+      '" data-graphic-unit="' + attr(S, device.graphicUnitIndex || 1) + '/' + attr(S, device.graphicUnitCount || 1) +
+      '" data-projection-role="' + attr(S, device.projectionRole || '') +
+      '" data-off-page-connector-count="' + number((device.offPageConnectors || []).length) +
+      '" data-layer="EVSE-EQPT">';
     primitives.forEach((primitive) => { out += renderEquipmentPrimitive(S, primitive); });
     return out + '</g>';
   }
@@ -352,28 +428,34 @@
     IR.assertValidDrawingIR(ir);
     const design = result && result.design ? result.design : {};
     const requirements = design.requirements || {};
-    const title = (options && options.title) || '充电桩电气原理图';
-    const subtitle = [
+    const opts = options || {};
+    const includeSchedule = opts.includeSchedule !== false;
+    const includeLegend = opts.includeLegend !== false;
+    const title = opts.title || '充电桩电气原理图';
+    const subtitle = opts.subtitle || [
       requirements.standardName || requirements.standard || '受控接口标准',
       requirements.outputKw != null ? requirements.outputKw + 'kW' : '',
       requirements.gunCount != null ? requirements.gunCount + ' 枪' : '',
       'EDEM ' + String(design.schemaVersion || ''),
       '图模覆盖 ' + (ir.coverage && ir.coverage.ok ? 'PASS' : 'BLOCKED')
     ].filter(Boolean).join(' | ');
-    const rowsForSchedule = scheduleRows(compiled);
-    const scheduleTop = plan.schedule.y + 20;
+    const rowsForSchedule = includeSchedule ? scheduleRows(compiled) : [];
+    const scheduleTop = (plan.schedule && plan.schedule.y || 68) + 20;
     /* Three wrapped specification lines are possible, so reserve the full
        deterministic worst-case row height before opening the selected viewBox. */
-    const scheduleBottomEstimate = scheduleTop + 20 + rowsForSchedule.length * 32;
+    const scheduleBottomEstimate = includeSchedule ? scheduleTop + 24 + rowsForSchedule.length * 38 : 0;
     const width = Math.max(1680, Math.ceil(plan.width));
-    const height = Math.max(1188, Math.ceil(plan.height), Math.ceil(scheduleBottomEstimate + 340));
+    const height = Math.max(1188, Math.ceil(plan.height), includeSchedule ? Math.ceil(scheduleBottomEstimate + 340) : 0);
     const plannedSheet = plan.sheet || {
       format: 'CUSTOM', orientation: width >= height ? 'LANDSCAPE' : 'PORTRAIT',
       widthMm: Math.ceil(width / 4), heightMm: Math.ceil(height / 4), scale: '1:4'
     };
     const doc = S.documentMeta(result, 'ev-schematic', {
       designer: S.clip((result && result.inputs && result.inputs.designer) || '自动生成（待校核）', 9, 120),
-      page: { current: 1, total: (compiled.sheets || []).length || 1 },
+      page: {
+        current: Number(opts.pageCurrent || 1),
+        total: Number(opts.pageTotal || (compiled.sheets || []).length || 1)
+      },
       scale: plannedSheet.scale || '1:4',
       sheet: {
         format: plannedSheet.format,
@@ -384,6 +466,12 @@
     });
     let svg = S.svgOpen(width, height, title, subtitle, doc);
     svg = rootAttribute(svg, 'data-ir-schema', ir.schema, S);
+    svg = rootAttribute(svg, 'data-sheet-id', opts.sheetId || '', S);
+    svg = rootAttribute(svg, 'data-drawing-no', opts.drawingNo || '', S);
+    svg = rootAttribute(svg, 'data-page-current', Number(opts.pageCurrent || 1), S);
+    svg = rootAttribute(svg, 'data-page-total', Number(opts.pageTotal || (compiled.sheets || []).length || 1), S);
+    svg = rootAttribute(svg, 'data-source-model-hash', design.modelHash || opts.sourceModelHash || '', S);
+    svg = rootAttribute(svg, 'data-schedule-included', includeSchedule ? 'true' : 'false', S);
     /* drawPile computes this hash immediately before this synchronous render.
        Reuse it for the same IR object; standalone callers still compute it. */
     const geometryHash = result && result.drawingIR === ir && result.drawingGeometryHash
@@ -401,34 +489,39 @@
     svg += S.watermark(width, height, result && result.inputs && result.inputs.watermarkText || '方案草案');
     svg += '<g id="EVSE-DRAWING-IR" data-ir-schema="' + attr(S, ir.schema) + '">';
     svg += renderAliasTraces(S, ir);
+    svg += renderOffPageMetadata(S, opts.offPageConnectors || compiled.offPageConnectors || []);
     svg += renderAnnotations(S, ir);
     svg += renderRoutes(S, ir);
     svg += renderMarkers(S, ir);
     svg += renderDevices(S, ir);
     svg += '</g>';
 
-    const scheduleX = plan.schedule.x;
-    const scheduleWidth = plan.schedule.width;
-    svg += S.schedule(rowsForSchedule, scheduleX, scheduleTop, scheduleWidth,
-      '设备明细表（全部条目来自 EDEM instances）');
-    const legendY = Math.max(scheduleBottomEstimate + 20, height - 300);
-    svg += S.legend([
-      { color: S.C.ac, thick: 2, label: 'POWER_AC 交流电源回路' },
-      { color: S.C.dc, thick: 2, label: 'POWER_DC 充电直流回路（DC+/DC−）' },
-      { color: S.C.ess, thick: 2, label: 'POWER_DC_ESS 储能直流回路' },
-      { color: S.C.aux, thick: 1.6, label: 'POWER_DC_AUX 24V / 12V 辅助电源' },
-      { color: S.C.ctl, label: 'SIGNAL_CTRL 控制/联锁/采样' },
-      { color: S.C.comm, label: 'SIGNAL_COMM 通信' },
-      { color: S.C.pe, thick: 2, label: 'PE 保护接地排 / 等电位连接' }
-    ], scheduleX, legendY, scheduleWidth);
+    const scheduleX = plan.schedule && plan.schedule.x || Math.max(40, width - 450);
+    const scheduleWidth = plan.schedule && plan.schedule.width || 400;
+    if (includeSchedule) svg += '<g id="EVSE-SCHEDULE" data-layer="EVSE-TABLE">' +
+      S.schedule(rowsForSchedule, scheduleX, scheduleTop, scheduleWidth,
+        '设备明细表（全部条目来自 EDEM instances）') + '</g>';
+    const legendY = includeSchedule ? Math.max(scheduleBottomEstimate + 20, height - 300) : height - 300;
+    if (includeLegend) svg += '<g id="EVSE-LEGEND" data-layer="EVSE-ANNO">' + S.legend([
+      { color: S.C.ac, thick: 2.4, label: 'POWER_AC 交流电源回路' },
+      { color: S.C.dc, thick: 2.4, label: 'POWER_DC 充电直流回路（DC+/DC−）' },
+      { color: S.C.ess, thick: 2.4, label: 'POWER_DC_ESS 储能直流回路' },
+      { color: S.C.aux, thick: 1.7, label: 'POWER_DC_AUX 24V / 12V 辅助电源' },
+      { color: S.C.ctl, thick: 1.25, dash: '8 4', label: 'SIGNAL_CTRL 控制/联锁/采样（长虚线）' },
+      { color: S.C.comm, thick: 1.25, dash: '2.5 3', label: 'SIGNAL_COMM 通信（短虚线）' },
+      { color: S.C.pe, thick: 2.6, label: 'PE 保护接地排 / 等电位连接' }
+    ], includeSchedule ? scheduleX : Math.max(40, width - 450), legendY,
+    includeSchedule ? scheduleWidth : 400) + '</g>';
+    svg += '<g id="EVSE-FOOTNOTES" data-layer="EVSE-ANNO">';
     const summary = connectorSummary(compiled);
-    if (summary) svg += S.txt(40, height - 128, '充电接口点对点连接：' + summary, 7, S.C.ctl, 'start', 'bold');
+    if (summary) svg += S.txt(40, height - 128, '充电接口点对点连接：' + summary, 9, S.C.ctl, 'start', 'bold');
     svg += S.txt(40, height - 114,
-      '全部设备、网络、回路与端点来自 EDEM；坐标仅由确定性 placement/router 产生，AI 不生成或修改坐标。',
-      7, S.C.anno, 'start');
+      opts.projectionNote || '全部设备、网络、回路与端点来自 EDEM；坐标仅由确定性 placement/router 产生，AI 不生成或修改坐标。',
+      9, S.C.anno, 'start');
     svg += S.txt(40, height - 102,
       '本图为方案级自动草图，短路、保护配合、EMC、温升、消防、并网及接口一致性仍须专业复核和试验。',
-      7, S.C.anno, 'start');
+      9, S.C.anno, 'start');
+    svg += '</g>';
     svg += '</svg>';
     return svg;
   }

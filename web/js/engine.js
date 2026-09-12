@@ -27,6 +27,11 @@ window.EVSE_ENGINE = (function () {
   const round = (n) => Math.round(n);
   const cnyToWan = (value) => r2(value / 10000);
   const safeText = (value, fallback) => String(value == null ? fallback : value).replace(/[<>]/g, '').trim() || fallback;
+  function deepFreeze(value) {
+    if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+    Object.keys(value).forEach((key) => deepFreeze(value[key]));
+    return Object.freeze(value);
+  }
 
   /* 输出电压窗口档位（模块输出范围，不是电池电压） */
   const VOLTAGE_WINDOWS = {
@@ -493,7 +498,11 @@ window.EVSE_ENGINE = (function () {
     };
 
     const drawingSkill = window.EVSE_DRAWING_SKILL;
-    if (drawingSkill && typeof drawingSkill.apply === 'function') return drawingSkill.apply(baseResult);
+    if (drawingSkill && typeof drawingSkill.apply === 'function') {
+      const enriched = drawingSkill.apply(baseResult);
+      deepFreeze(enriched.design);
+      return enriched;
+    }
 
     /* 规则包未加载时保持“失败即封闭”：仍可预览，但不得当作已校验结果。 */
     baseResult.drawingSkill = {
@@ -510,6 +519,7 @@ window.EVSE_ENGINE = (function () {
     baseResult.readiness.blockingItems.push({ id: 'DRAW-SKILL-MISSING', title: '绘图规则包未加载', status: 'BLOCKED', detail: '检查 js/drawing-skill.js 的部署和加载顺序。' });
     baseResult.readiness.release.drawingRuleStatus = 'BLOCKED—SKILL_NOT_LOADED';
     baseResult.releaseGate = baseResult.readiness.release;
+    deepFreeze(baseResult.design);
     return baseResult;
   }
 

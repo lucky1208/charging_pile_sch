@@ -13,9 +13,9 @@
 window.SYM = (function () {
   'use strict';
 
-  /* ---------- 颜色规范 EVSE-COLOR-SCHEME v1.0（依据见 js/color-scheme.js） ----------
-   * IEC 60446 识别色：PE 绿(专用)、N 蓝(专用)、相线棕；直流红系；
-   * 其余为项目约定；设备块底色用所属回路浅色 fill.*；G041 闸门白名单自检。 */
+  /* ---------- 颜色规范 EVSE-COLOR-SCHEME（依据见 color-scheme.js） ----------
+   * 屏幕配色与线型是项目可视化约定；PE/N/DC 极性还必须由符号、文字和端子语义表达。
+   * 导体标识依据项目采用的 IEC 60445 / GB/T 6995 版次复核；G041 仅检查本项目白名单。 */
   const C = window.EVSE_COLOR_SCHEME ? window.EVSE_COLOR_SCHEME.palette() : {
     ink: '#0f172a', ac: '#92400e', n: '#0284c7', dc: '#dc2626', ess: '#ea580c',
     aux: '#0e7490', ctl: '#475569', comm: '#7c3aed', pe: '#15803d', saf: '#dc2626',
@@ -376,43 +376,43 @@ window.SYM = (function () {
   /* ---------- 图例 ---------- */
   function legend(items, x, y, w) {
     const c = C.ink, width = w || 220;
-    let s = `<rect x="${x}" y="${y}" width="${width}" height="${items.length * 17 + 26}" fill="#fff"
+    let s = `<rect x="${x}" y="${y}" width="${width}" height="${items.length * 20 + 29}" fill="#fff"
       stroke="${c}" stroke-width="1.1" rx="3"/>
-    ${txt(x + 10, y + 16, '图例 LEGEND', 9.5, c, 'start', 'bold')}`;
+    ${txt(x + 10, y + 18, '图例 LEGEND', 10.5, c, 'start', 'bold')}`;
     items.forEach((item, i) => {
-      const yy = y + 31 + i * 17;
+      const yy = y + 35 + i * 20;
       s += `<line x1="${x + 10}" y1="${yy}" x2="${x + 44}" y2="${yy}" stroke="${item.color}"
         stroke-width="${item.thick || 1.6}" ${item.dash ? `stroke-dasharray="${item.dash}"` : ''}/>`;
-      s += txt(x + 50, yy + 3.2, clip(item.label, 8, width - 58), 8, '#334155', 'start');
+      s += txt(x + 50, yy + 3.6, clip(item.label, 9.5, width - 58), 9.5, '#334155', 'start');
     });
     return s;
   }
 
   /* ---------- 设备明细表（图上只放位号，规格集中在此） ---------- */
   function schedule(rows, x, y, w, title) {
-    const c = C.ink, headH = 16, lineH = 9.4, pad = 3.2;
+    const c = C.ink, headH = 20, lineH = 11, pad = 4;
     const c1 = x + 46, c2 = x + 122;
     const specWidth = x + w - c2 - 6;
     const prepared = rows.map((row) => ({
-      tag: row.tag, name: clip(row.name, 6.8, c2 - c1 - 6),
-      lines: wrap(row.spec, 6.4, specWidth, 3)
+      tag: row.tag, name: clip(row.name, 8.5, c2 - c1 - 6),
+      lines: wrap(row.spec, 8, specWidth, 3)
     }));
     const heights = prepared.map((row) => Math.max(row.lines.length, 1) * lineH + pad);
     const total = headH + heights.reduce((sum, h) => sum + h, 0);
     let s = `<rect x="${x}" y="${y}" width="${w}" height="${total}" fill="#fff" stroke="${c}" stroke-width="1.2"/>
-    ${txt(x + w / 2, y - 6, title || '设备明细表（规格为方案级档位，须经 RFQ 与专业校核）', 8.5, c, 'middle', 'bold')}
+    ${txt(x + w / 2, y - 7, title || '设备明细表（规格为方案级档位，须经 RFQ 与专业校核）', 10, c, 'middle', 'bold')}
     <line x1="${x}" y1="${y + headH}" x2="${x + w}" y2="${y + headH}" stroke="${c}" stroke-width="0.9"/>
     <line x1="${c1}" y1="${y}" x2="${c1}" y2="${y + total}" stroke="${c}" stroke-width="0.7"/>
     <line x1="${c2}" y1="${y}" x2="${c2}" y2="${y + total}" stroke="${c}" stroke-width="0.7"/>
-    ${txt(x + 5, y + 11, '位号', 7.5, c, 'start', 'bold')}
-    ${txt(c1 + 5, y + 11, '名称', 7.5, c, 'start', 'bold')}
-    ${txt(c2 + 5, y + 11, '规格 / 状态', 7.5, c, 'start', 'bold')}`;
+    ${txt(x + 5, y + 14, '位号', 9, c, 'start', 'bold')}
+    ${txt(c1 + 5, y + 14, '名称', 9, c, 'start', 'bold')}
+    ${txt(c2 + 5, y + 14, '规格 / 状态', 9, c, 'start', 'bold')}`;
     let cursor = y + headH;
     prepared.forEach((row, i) => {
-      s += txt(x + 5, cursor + 8, clip(row.tag, 6.8, 38), 6.8, c, 'start', 'bold', MONO);
-      s += txt(c1 + 5, cursor + 8, row.name, 6.8, c, 'start');
+      s += txt(x + 5, cursor + 9, clip(row.tag, 8.5, 38), 8.5, c, 'start', 'bold', MONO);
+      s += txt(c1 + 5, cursor + 9, row.name, 8.5, c, 'start');
       row.lines.forEach((line, li) => {
-        s += txt(c2 + 5, cursor + 8 + li * lineH, line, 6.4, '#334155', 'start');
+        s += txt(c2 + 5, cursor + 9 + li * lineH, line, 8, '#334155', 'start');
       });
       cursor += heights[i];
       if (i < prepared.length - 1) s += `<line x1="${x}" y1="${cursor}" x2="${x + w}" y2="${cursor}" stroke="${c}" stroke-width="0.5"/>`;
@@ -493,7 +493,7 @@ window.SYM = (function () {
     const layerManifest = esc(JSON.stringify(layers));
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${sheet.widthMm}mm" height="${sheet.heightMm}mm" preserveAspectRatio="xMidYMid meet" data-sheet-format="${sheet.format}" data-sheet-orientation="${sheet.orientation}" data-units="mm" data-document-key="${esc(m.drawingKey || '')}" data-document-status="${esc(status)}" data-document-control="CONCEPTUAL_SCHEME" data-drawing-skill="${esc(skill.id || '')}" data-drawing-skill-version="${esc(skill.version || '')}" data-drawing-skill-status="${esc(skill.status || 'BLOCKED')}" data-drawing-profile="${esc(skill.profile || '')}" data-selected-rules="${esc((skill.selectedRuleIds || []).join(','))}" data-evaluated-rules="${esc((skill.evaluatedRuleIds || []).join(','))}" data-applied-rules="${esc((skill.appliedRuleIds || []).join(','))}" data-cad-layer-manifest="${layerManifest}">
     <title>${esc(title)}</title><desc>${esc(status)}</desc><metadata>${metadata}</metadata>
-    <rect width="${W}" height="${H}" fill="#ffffff"/>
+    <rect id="EVSE-PAPER" width="${W}" height="${H}" fill="#ffffff"/>
     <g id="EVSE-FRAME" data-layer="EVSE-FRAME">
       <rect x="8" y="8" width="${W - 16}" height="${H - 16}" fill="none" stroke="${C.ink}" stroke-width="2"/>
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" fill="none" stroke="${C.ink}" stroke-width="0.8"/>
@@ -503,23 +503,23 @@ window.SYM = (function () {
       <line x1="${tbX}" y1="${tbY + 63}" x2="${tbX + tbW}" y2="${tbY + 63}" stroke="${C.ink}" stroke-width="0.9"/>
       <line x1="${splitA}" y1="${tbY}" x2="${splitA}" y2="${tbY + tbH}" stroke="${C.ink}" stroke-width="0.9"/>
       <line x1="${splitB}" y1="${tbY}" x2="${splitB}" y2="${tbY + 63}" stroke="${C.ink}" stroke-width="0.9"/>
-      <text x="${tbX + 6}" y="${tbY + 13}" font-size="7.5" fill="${C.ink}" font-family="${FONT}">项目: ${esc(clip(proj, 7.5, tbW * 0.5))}</text>
-      <text x="${tbX + 6}" y="${tbY + 35}" font-size="9.4" font-weight="bold" fill="${C.ink}" font-family="${FONT}">${esc(clip(title, 9.4, tbW * 0.5))}</text>
-      <text x="${tbX + 6}" y="${tbY + 57}" font-size="6.8" fill="${C.ink}" font-family="${FONT}">文件集: ${esc(m.documentSetId || '待分配')}</text>
-      <text x="${tbX + 6}" y="${tbY + 78}" font-size="6.8" fill="${C.warn}" font-weight="bold" font-family="${FONT}">状态: ${esc(statusLabel)}</text>
-      <text x="${splitA + 5}" y="${tbY + 12}" font-size="7.2" fill="${C.ink}" font-family="${FONT}">图号: ${esc(no)}</text>
-      <text x="${splitA + 5}" y="${tbY + 31}" font-size="7.2" fill="${C.ink}" font-family="${FONT}">修订: ${esc(rev)} · ${esc(discipline)}</text>
-      <text x="${splitA + 5}" y="${tbY + 51}" font-size="6.7" fill="${C.ink}" font-family="${FONT}">设计人: ${esc(designer)}</text>
-      <text x="${splitA + 5}" y="${tbY + 70}" font-size="6.7" fill="${C.ink}" font-family="${FONT}">校核: ${esc(checker)} · 批准: ${esc(approver)}</text>
-      <text x="${splitB + 5}" y="${tbY + 12}" font-size="7.1" fill="${C.ink}" font-family="${FONT}">图幅: ${esc(sheet.format)}</text>
-      <text x="${splitB + 5}" y="${tbY + 31}" font-size="7.1" fill="${C.ink}" font-family="${FONT}">比例: ${esc(scale)} · 页: ${esc(page.current)}/${esc(page.total)}</text>
-      <text x="${splitB + 5}" y="${tbY + 51}" font-size="6.7" fill="${C.ink}" font-family="${FONT}">阶段: 方案级</text>
-      <text x="${splitB + 5}" y="${tbY + 70}" font-size="6.7" fill="${C.ink}" font-family="${FONT}">签发: ${esc(date)}</text>
+      <text x="${tbX + 6}" y="${tbY + 13}" font-size="9.5" fill="${C.ink}" font-family="${FONT}">项目: ${esc(clip(proj, 9.5, tbW * 0.5))}</text>
+      <text x="${tbX + 6}" y="${tbY + 35}" font-size="11" font-weight="bold" fill="${C.ink}" font-family="${FONT}">${esc(clip(title, 11, tbW * 0.5))}</text>
+      <text x="${tbX + 6}" y="${tbY + 57}" font-size="9" fill="${C.ink}" font-family="${FONT}">文件集: ${esc(m.documentSetId || '待分配')}</text>
+      <text x="${tbX + 6}" y="${tbY + 78}" font-size="9" fill="${C.warn}" font-weight="bold" font-family="${FONT}">状态: ${esc(statusLabel)}</text>
+      <text x="${splitA + 5}" y="${tbY + 12}" font-size="9" fill="${C.ink}" font-family="${FONT}">图号: ${esc(no)}</text>
+      <text x="${splitA + 5}" y="${tbY + 31}" font-size="9" fill="${C.ink}" font-family="${FONT}">修订: ${esc(rev)} · ${esc(discipline)}</text>
+      <text x="${splitA + 5}" y="${tbY + 51}" font-size="9" fill="${C.ink}" font-family="${FONT}">设计人: ${esc(designer)}</text>
+      <text x="${splitA + 5}" y="${tbY + 70}" font-size="9" fill="${C.ink}" font-family="${FONT}">校核: ${esc(checker)} · 批准: ${esc(approver)}</text>
+      <text x="${splitB + 5}" y="${tbY + 12}" font-size="9" fill="${C.ink}" font-family="${FONT}">图幅: ${esc(sheet.format)}</text>
+      <text x="${splitB + 5}" y="${tbY + 31}" font-size="9" fill="${C.ink}" font-family="${FONT}">比例: ${esc(scale)} · 页: ${esc(page.current)}/${esc(page.total)}</text>
+      <text x="${splitB + 5}" y="${tbY + 51}" font-size="9" fill="${C.ink}" font-family="${FONT}">阶段: 方案级</text>
+      <text x="${splitB + 5}" y="${tbY + 70}" font-size="9" fill="${C.ink}" font-family="${FONT}">签发: ${esc(date)}</text>
     </g>
     <g id="EVSE-TITLE" data-layer="EVSE-TEXT">
       <text x="${W / 2}" y="30" text-anchor="middle" font-size="15" font-weight="bold" fill="${C.ink}" font-family="${FONT}">${esc(title)}</text>
-      <text x="${W / 2}" y="46" text-anchor="middle" font-size="9" fill="#334155" font-family="${FONT}">${esc(clip(sub || '', 9, W - 260))}</text>
-      <text x="${W - 24}" y="46" text-anchor="end" font-size="7" fill="${C.anno}" font-family="${FONT}">${esc(clip(st, 7, 420))}</text>
+      <text x="${W / 2}" y="46" text-anchor="middle" font-size="10.5" fill="#334155" font-family="${FONT}">${esc(clip(sub || '', 10.5, W - 260))}</text>
+      <text x="${W - 24}" y="46" text-anchor="end" font-size="9" fill="${C.anno}" font-family="${FONT}">${esc(clip(st, 9, 420))}</text>
     </g>`;
   }
 

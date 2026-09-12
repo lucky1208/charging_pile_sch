@@ -1,0 +1,32 @@
+{
+  "schema": "schematicforge-knowledge-watch/v1",
+  "policy": {
+    "outputLifecycle": "CANDIDATE",
+    "autoApprove": false,
+    "autoModifyProductionRules": false,
+    "humanReviewRequired": true
+  },
+  "approvedSelectionRegistry": {
+    "status": "NOT_CONFIGURED",
+    "files": [],
+    "note": "将经受控审批导出的只读注册表放入 knowledge/approved-selections，并将 status 改为 ACTIVE；空库必须保持 REVIEW_REQUIRED。"
+  },
+  "approvedComponentLinks": [],
+  "researchQueries": [
+    {
+      "id": "EVSE-STANDARDS-CHANGE",
+      "topic": "充电接口、充电设备、电气安全和通信标准的最新正式修订、勘误或替代版本",
+      "preferredSources": ["标准组织官网", "监管机构官网"]
+    },
+    {
+      "id": "EVSE-COMPONENT-LIFECYCLE",
+      "topic": "充电桩直流接触器、熔断器、绝缘监测和充电接口的停产通知、PCN、召回与官方替代料",
+      "preferredSources": ["原制造商官网", "制造商PCN/EOL公告"]
+    },
+    {
+      "id": "EVSE-FIELD-EXPERIENCE",
+      "topic": "充电桩调试、互操作、EMC、热管理、接触器粘连与绝缘监测的最新工程经验和重复故障模式",
+      "preferredSources": ["制造商应用笔记", "标准组织技术资料", "行业会议论文", "技术论坛（只能作为低置信线索）"]
+    }
+  ]
+}

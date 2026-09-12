@@ -66,21 +66,34 @@
   }
   function normalizeDevice(value) {
     const bodyId = value.id + ':BODY';
-    return IR.createPlacedDevice({
+    const device = IR.createPlacedDevice({
       id: value.id, type: value.type, symbolId: value.symbolId,
       symbolFallback: value.symbolFallback, system: value.system, tag: value.tag,
       referenceDesignation: value.referenceDesignation, bbox: bboxInput(value.bbox),
       ports: value.ports, keepouts: (value.keepouts || []).filter((item) => item.id !== bodyId),
       layer: value.layer, label: value.label
     });
+    return Object.freeze(Object.assign({}, device, {
+      modelInstanceId: value.modelInstanceId || value.graphicalRepresentationOf || value.id,
+      graphicalRepresentationOf: value.graphicalRepresentationOf || value.modelInstanceId || value.id,
+      graphicUnitIndex: value.graphicUnitIndex,
+      graphicUnitCount: value.graphicUnitCount,
+      projectionRole: value.projectionRole || '',
+      offPageConnectors: deepFreeze(clone(value.offPageConnectors || []))
+    }));
   }
   function normalizeRoute(value) {
-    return IR.routeOrthogonal({
+    const route = IR.routeOrthogonal({
       id: value.id, netId: value.netId, circuitId: value.circuitId,
       netClass: value.netClass, domain: value.domain, polarity: value.polarity, phase: value.phase,
       protocol: value.protocol, source: value.source, target: value.target,
       points: value.points, layer: value.layer, bridgePriority: value.bridgePriority, style: value.style
     });
+    return Object.freeze(Object.assign({}, route, {
+      globalSource: value.globalSource ? deepFreeze(clone(value.globalSource)) : undefined,
+      globalTarget: value.globalTarget ? deepFreeze(clone(value.globalTarget)) : undefined,
+      offPageConnector: value.offPageConnector ? deepFreeze(clone(value.offPageConnector)) : null
+    }));
   }
   function rebuild(state, model) {
     return IR.buildDrawingIR({
@@ -632,7 +645,7 @@
       if (!port) return Object.freeze([]);
       const result = [];
       current.routes.forEach((route) => {
-        let opposite = null; let role = '';
+        let opposite = null; let graphicalOpposite = null; let role = '';
         const sourceMatches = route.source.deviceId === device.id &&
           (route.source.portId === port.id || (route.source.ref === port.ref &&
             Math.abs(route.source.x - port.x) < 1e-9 && Math.abs(route.source.y - port.y) < 1e-9));
@@ -640,13 +653,24 @@
           (route.target.portId === port.id || (route.target.ref === port.ref &&
             Math.abs(route.target.x - port.x) < 1e-9 && Math.abs(route.target.y - port.y) < 1e-9));
         if (sourceMatches) {
-          opposite = route.target; role = 'SOURCE';
+          graphicalOpposite = route.target;
+          opposite = route.globalTarget || route.target;
+          role = 'SOURCE';
         } else if (targetMatches) {
-          opposite = route.source; role = 'TARGET';
+          graphicalOpposite = route.source;
+          opposite = route.globalSource || route.source;
+          role = 'TARGET';
         }
         if (opposite) result.push(Object.freeze({ routeId: route.id, circuitId: route.circuitId,
           netId: route.netId, netClass: route.netClass, role, oppositeRef: opposite.ref,
-          oppositeDeviceId: opposite.deviceId, oppositePortId: opposite.portId }));
+          oppositeDeviceId: opposite.deviceId, oppositePortId: opposite.portId,
+          graphicalOppositeRef: graphicalOpposite && graphicalOpposite.ref || opposite.ref,
+          globalSourceRef: route.globalSource && route.globalSource.ref || route.source.ref,
+          globalTargetRef: route.globalTarget && route.globalTarget.ref || route.target.ref,
+          offPageConnectorId: route.offPageConnector && route.offPageConnector.id || '',
+          remoteSheetId: route.offPageConnector && route.offPageConnector.remoteSheetId || '',
+          remoteDrawingNo: route.offPageConnector && route.offPageConnector.xref &&
+            route.offPageConnector.xref.drawingNo || '' }));
       });
       result.sort((a, b) => compareText(a.routeId, b.routeId));
       return Object.freeze(result);

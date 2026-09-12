@@ -5,6 +5,13 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const MODULE_PATH = path.resolve(__dirname, '..', 'api', 'ai.js');
+const TEST_ACCESS_TOKEN = 'test-only-ai-access-token-0123456789abcdef';
+const ORIGINAL_ACCESS_TOKEN = process.env.ENGINEERING_API_ACCESS_TOKEN;
+process.env.ENGINEERING_API_ACCESS_TOKEN = TEST_ACCESS_TOKEN;
+test.after(() => {
+  if (ORIGINAL_ACCESS_TOKEN === undefined) delete process.env.ENGINEERING_API_ACCESS_TOKEN;
+  else process.env.ENGINEERING_API_ACCESS_TOKEN = ORIGINAL_ACCESS_TOKEN;
+});
 
 function freshHandler() {
   delete require.cache[MODULE_PATH];
@@ -31,6 +38,7 @@ async function invoke(handler, options) {
       host: 'evse.example',
       'x-forwarded-proto': 'https',
       'content-type': 'application/json',
+      authorization: 'Bearer ' + TEST_ACCESS_TOKEN,
       'x-forwarded-for': input.ip || '203.0.113.1'
     }, input.headers || {}),
     body: Object.prototype.hasOwnProperty.call(input, 'body') ? input.body : {},
@@ -72,7 +80,9 @@ test('status contract exposes booleans only and remains frontend-compatible', as
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.payload, {
       ok: true,
-      providers: { kimi: true, deepseek: false, glm: Boolean(process.env.ZHIPUAI_API_KEY) }
+      providers: { kimi: true, deepseek: false, glm: Boolean(process.env.ZHIPUAI_API_KEY) },
+      authenticationRequired: true,
+      accessControlConfigured: true
     });
     assert.equal(JSON.stringify(res.payload).includes('do-not-leak'), false);
     assert.equal(res.headers['cache-control'], 'no-store');
@@ -107,6 +117,56 @@ test('method and JSON media type are enforced before provider access', async () 
     body: JSON.stringify({ action: 'parse', provider: 'deepseek', text: '120kW' })
   });
   assert.equal(media.statusCode, 415);
+});
+
+test('POST access control is mandatory, constant-boundary headers agree, and missing configuration fails closed', async () => {
+  const handler = freshHandler();
+  const missing = await invoke(handler, {
+    headers: { authorization: '' }, body: { action: 'parse', provider: 'deepseek', text: '120kW' }
+  });
+  assert.equal(missing.statusCode, 401);
+  assert.match(missing.headers['www-authenticate'], /Bearer/);
+
+  const wrong = await invoke(handler, {
+    headers: { authorization: 'Bearer wrong-access-token-0123456789abcdef' },
+    body: { action: 'parse', provider: 'deepseek', text: '120kW' }, ip: '203.0.113.91'
+  });
+  assert.equal(wrong.statusCode, 401);
+
+  const headerOnly = await invoke(handler, {
+    headers: { authorization: '', 'x-engineering-access-token': TEST_ACCESS_TOKEN },
+    body: { action: 'execute' }, ip: '203.0.113.92'
+  });
+  assert.equal(headerOnly.statusCode, 400);
+
+  const conflicting = await invoke(handler, {
+    headers: { 'x-engineering-access-token': 'different-access-token-0123456789abcdef' },
+    body: { action: 'execute' }, ip: '203.0.113.93'
+  });
+  assert.equal(conflicting.statusCode, 401);
+
+  const saved = process.env.ENGINEERING_API_ACCESS_TOKEN;
+  delete process.env.ENGINEERING_API_ACCESS_TOKEN;
+  try {
+    const unconfigured = await invoke(freshHandler(), {
+      body: { action: 'parse', provider: 'deepseek', text: '120kW' }, ip: '203.0.113.94'
+    });
+    assert.equal(unconfigured.statusCode, 503);
+    assert.match(unconfigured.payload.error, /访问控制/);
+  } finally {
+    process.env.ENGINEERING_API_ACCESS_TOKEN = saved;
+  }
+
+  process.env.ENGINEERING_API_ACCESS_TOKEN = 'x'.repeat(31);
+  try {
+    const undersized = await invoke(freshHandler(), {
+      body: { action: 'parse', provider: 'deepseek', text: '120kW' }, ip: '203.0.113.95'
+    });
+    assert.equal(undersized.statusCode, 503);
+    assert.match(undersized.payload.error, /访问控制/);
+  } finally {
+    process.env.ENGINEERING_API_ACCESS_TOKEN = saved;
+  }
 });
 
 test('declared and actual oversized request bodies fail closed', async () => {

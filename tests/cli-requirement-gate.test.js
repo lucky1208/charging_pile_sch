@@ -39,7 +39,8 @@ test('CLI 对显式非法值和越界参数 fail-closed', () => {
 
 test('CLI 导出实现不包含 SVG 反解析回退', () => {
   const source = require('node:fs').readFileSync(path.join(rootDir, 'scripts', 'generate.js'), 'utf8');
-  assert.match(source, /exportDrawingIR\(R\.drawingIR, dxfOptions\)/);
+  assert.match(source, /exportDrawingIR\(page\.compiled\.drawingIR, dxfOptions\)/);
   assert.doesNotMatch(source, /exportSvgLegacy\(stamped/);
-  assert.match(source, /drawingIR:\s*R\.drawingIR \|\| null/);
+  assert.match(source, /drawingIRHash:\s*page\.geometryHash/);
+  assert.match(source, /schematicDocument:\s*renderedDocument\.document/);
 });
