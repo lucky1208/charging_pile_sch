@@ -70,7 +70,15 @@ test('drawPile compiles exact design collections and SVG carries trace attribute
   assert.match(svg, /data-net="N1"/);
   assert.match(svg, /data-circuit="C1"/);
   assert.match(svg, /data-layer="EVSE-CTL"/);
-  assert.match(svg, /stroke-dasharray="8 4"/);
+  const routePieces = svg.match(/<(?:line|path|polyline)\b(?=[^>]*\bdata-route=")[^>]*\/>/g) || [];
+  assert.ok(routePieces.length > 0, 'the fixture must render selectable electrical conductor pieces');
+  routePieces.forEach((piece) => assert.doesNotMatch(piece, /\bstroke-dasharray=/,
+    'every electrical conductor must be rendered as a continuous solid line'));
+  const dashedAuxiliaryShapes = svg.match(
+    /<(?:line|path|polyline|rect)\b(?=[^>]*\bstroke-dasharray=")(?![^>]*\bdata-route=")[^>]*\/>/g
+  ) || [];
+  assert.ok(dashedAuxiliaryShapes.length > 0,
+    'non-electrical functional-zone or symbol guidance may remain dashed');
   const routeSegmentCount = R.drawingIR.routes.reduce((sum, route) => sum + route.segments.length, 0);
   assert.equal((svg.match(/data-editor-hit-target="true"/g) || []).length, routeSegmentCount,
     'every orthogonal segment has one non-scaling editor hit target');

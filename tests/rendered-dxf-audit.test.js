@@ -20,6 +20,26 @@ function drawing() {
   ] });
 }
 
+function entityLinetype(entity) {
+  const pair = entity && entity.pairs.find((candidate) => candidate.code === 6);
+  return pair && pair.value;
+}
+
+function mutatePrimitiveLinetype(dxf, primitiveId, linetype) {
+  const pairs = AUDIT.parsePairs(dxf).map((pair) => ({ code: pair.code, value: pair.value }));
+  const encoded = encodeURIComponent(primitiveId);
+  const traceIndex = pairs.findIndex((pair) => pair.code === 1000 && pair.value === 'primitiveId=' + encoded);
+  assert.ok(traceIndex >= 0, primitiveId + ' XDATA must be present');
+  let entityStart = traceIndex;
+  while (entityStart >= 0 && pairs[entityStart].code !== 0) entityStart -= 1;
+  assert.ok(entityStart >= 0, primitiveId + ' entity boundary must be present');
+  const styleIndex = pairs.findIndex((pair, index) =>
+    index > entityStart && index < traceIndex && pair.code === 6);
+  assert.ok(styleIndex > entityStart, primitiveId + ' entity must declare a linetype');
+  pairs[styleIndex].value = linetype;
+  return pairs.map((pair) => String(pair.code) + '\n' + pair.value + '\n').join('');
+}
+
 test('independent DXF parser reconciles final entity geometry and XDATA to Drawing IR', () => {
   const ir = drawing();
   const exported = DXF.exportDrawingIR(ir);
@@ -27,6 +47,28 @@ test('independent DXF parser reconciles final entity geometry and XDATA to Drawi
   assert.equal(report.ok, true, JSON.stringify(report.errors));
   assert.equal(report.stats.primitives, ir.primitives.length);
   assert.equal(report.stats.entities, exported.stats.entities);
+  const entities = AUDIT.entityRecords(AUDIT.parsePairs(exported.dxf));
+  const routeTraces = exported.trace.filter((trace) => trace.routeId);
+  assert.equal(routeTraces.length, ir.routes.length);
+  routeTraces.forEach((trace) => {
+    assert.equal(entityLinetype(entities[trace.entityIndex]), 'CONTINUOUS', trace.routeId);
+  });
+  const communicationTrace = routeTraces.find((trace) => trace.routeId === 'R-V');
+  assert.ok(communicationTrace, 'fixture must export the EVSE-COMM route');
+  const communicationEntity = entities[communicationTrace.entityIndex];
+  assert.equal(communicationEntity.pairs.find((pair) => pair.code === 8).value, 'EVSE-COMM');
+  assert.equal(entityLinetype(communicationEntity), 'CONTINUOUS',
+    'the final EVSE-COMM route entity must carry DXF group code 6 CONTINUOUS');
+});
+
+test('DXF readback blocks a route entity whose linetype is changed to DASHED', () => {
+  const ir = drawing();
+  const dxf = DXF.exportDrawingIR(ir).dxf;
+  const dashed = mutatePrimitiveLinetype(dxf, 'ROUTE:R-V', 'DASHED');
+  const report = AUDIT.audit(dashed, ir);
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((error) =>
+    error.code === 'DXF_ELECTRICAL_CONDUCTOR_DASHED' && error.id === 'ROUTE:R-V'));
 });
 
 test('coordinate and trace-identity mutations fail even when exporter statistics are unavailable', () => {

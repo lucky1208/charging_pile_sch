@@ -24,6 +24,9 @@ const page = rendered.pages.find((item) => item.sheetId === 'S01');
 const AUDIT = win.EVSE_RENDERED_SVG_AUDIT;
 
 function audit(svg) { return AUDIT.audit(svg, page.compiled.drawingIR, win.SYM.C); }
+function conductorStyle(svg, ir) {
+  return AUDIT.auditElectricalConductorLineStyle(svg, ir || page.compiled.drawingIR);
+}
 function firstVisibleRouteLine(svg) {
   const match = /<line\b(?=[^>]*\bdata-route=")[^>]*\/>/.exec(svg);
   assert.ok(match, 'test page must contain a visible routed line');
@@ -38,6 +41,63 @@ test('all compiler pages reconcile from final SVG geometry to immutable Drawing 
     assert.equal(report.stats.primitives,
       candidate.compiled.drawingIR.primitives.filter((primitive) => primitive.equipmentId).length +
       candidate.compiled.drawingIR.annotations.length);
+    const lineStyle = AUDIT.auditElectricalConductorLineStyle(candidate.svg, candidate.compiled.drawingIR);
+    assert.equal(lineStyle.status, 'PASS', candidate.sheetId + ': ' + JSON.stringify(lineStyle.findings));
+    assert.equal(lineStyle.stats.dashedPieces, 0, candidate.sheetId);
+  });
+});
+
+test('G050 blocks direct and inherited route dashes while allowing dashed auxiliary graphics', () => {
+  const line = firstVisibleRouteLine(page.svg);
+  const routeId = /\bdata-route="([^"]+)"/.exec(line);
+  assert.ok(routeId, 'visible conductor must retain its route identity');
+
+  const directLine = line.replace('/>', ' stroke-dasharray="4 2"/>');
+  assert.notEqual(directLine, line);
+  const direct = conductorStyle(page.svg.replace(line, directLine));
+  assert.equal(direct.status, 'BLOCKED');
+  assert.ok(direct.findings.some((finding) =>
+    finding.code === 'SVG_ELECTRICAL_CONDUCTOR_DASHED' && finding.routeId === routeId[1]));
+
+  const groupStart = '<g id="ROUTE-' + routeId[1] + '"';
+  assert.ok(page.svg.includes(groupStart), 'route group must be present for inherited-style injection');
+  const inherited = conductorStyle(page.svg.replace(groupStart,
+    groupStart + ' stroke-dasharray="7 3"'));
+  assert.equal(inherited.status, 'BLOCKED');
+  assert.ok(inherited.findings.some((finding) =>
+    finding.code === 'SVG_ELECTRICAL_CONDUCTOR_DASHED' && finding.routeId === routeId[1]));
+
+  const nodes = AUDIT.parse(page.svg);
+  const dashedAuxiliary = nodes.filter((node) => node.attrs['stroke-dasharray'] &&
+    !Object.hasOwn(node.attrs, 'data-route'));
+  assert.ok(dashedAuxiliary.length > 0,
+    'functional-zone boundaries and non-electrical symbol guidance remain intentionally dashed');
+  assert.equal(conductorStyle(page.svg).status, 'PASS');
+});
+
+test('G050 also blocks a trace-bearing Drawing IR primitive that requests a dash', () => {
+  const drawingIR = JSON.parse(JSON.stringify(page.compiled.drawingIR));
+  const traced = drawingIR.primitives.find((primitive) => primitive.routeId);
+  assert.ok(traced, 'fixture must contain a renderer-neutral route primitive');
+  traced.dash = '3 2';
+  const report = conductorStyle(page.svg, drawingIR);
+  assert.equal(report.status, 'BLOCKED');
+  assert.ok(report.findings.some((finding) => finding.code === 'IR_ELECTRICAL_CONDUCTOR_DASHED'));
+});
+
+test('G050 fails closed when final SVG or Drawing IR evidence is missing or malformed', () => {
+  const cases = [
+    conductorStyle('', page.compiled.drawingIR),
+    conductorStyle('<svg><g id="EVSE-DRAWING-IR"></svg>', page.compiled.drawingIR),
+    conductorStyle(page.svg.replace('id="EVSE-DRAWING-IR"', 'id="EVSE-DRAWING-IR-MISSING"'),
+      page.compiled.drawingIR),
+    AUDIT.auditElectricalConductorLineStyle(page.svg, null)
+  ];
+  cases.forEach((report) => {
+    assert.equal(report.status, 'BLOCKED');
+    assert.equal(report.ok, false);
+    assert.ok(report.findings.some((finding) =>
+      finding.code === 'SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN'));
   });
 });
 

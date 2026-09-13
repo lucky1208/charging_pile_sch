@@ -1,4 +1,4 @@
-# SchematicForge EVSE 2.7
+# SchematicForge EVSE 2.7.1
 
 这是一个方案级充电桩电气设计编译器。输入经过需求确认后，被编译为 EDEM v4.1 端子级网表；SVG 和 DXF 都从同一 Drawing IR 生成，并由 ERC、几何与图模覆盖闸门 fail-closed。
 
@@ -18,9 +18,10 @@
 - **Claude EDA 参考审计**：吸收对象命中、局部重布、稀疏正交寻路、标签软避让、图层、框选与键盘工作流；拒绝穿器件 fallback、客户端密钥、猜测网络域、只保存坐标的伪撤销和可掩盖几何失败的评分。证据、实测缺陷、迁移内容与剩余边界见 [Claude 在线 EDA 参考代码审计与 2.4–2.5 集成说明](docs/CLAUDE-EDA-REFERENCE-INTEGRATION.md)。
 - **2.6 多页工程投影**：一个不可变 EDEM 被投影成 S01–S06 六张固定功能页；内部回路恰好出现一次，跨页回路由成对连接器表示两次并保留全局器件/PIN、远端页号和图号。高扇出器件可拆为多个可追溯图形单元，空功能页也保持稳定页号；页面编辑分别保存，任一页或项目覆盖闸门失败即禁止工程导出。
 - **2.6 审图与工程 BOM**：用户可上传 PNG/JPEG/WebP/SVG/PDF/JSON 发起 AI 辅助审图，确定性 ERC/几何/覆盖结论优先，AI 只能形成待复核候选。BOM 固定输出位号、类别、设备名称、型号、参考推荐厂家、关键参数、数量和说明手册下载；联网检索只产生带证据的候选，未显式批准的型号、厂家和链接不会进入主 BOM。
-- **2.6 知识维护与工作台**：参数、元器件库及“属性 / PIN / 网络”组成图纸上方的全宽横向控制台，可一次收起让图纸占满窗口，也可单独收起属性检查器并支持全屏；主回路、PE、控制和通信使用不同线宽、颜色和线型。每周只读任务检查已批准资料链接并收集标准、EOL/PCN、替代料和调试经验候选，始终执行 `CANDIDATE → REVIEWED → APPROVED` 人工晋级，不自动修改生产规则。
+- **2.6 知识维护与工作台**：参数、元器件库及“属性 / PIN / 网络”组成图纸上方的全宽横向控制台，可一次收起让图纸占满窗口，也可单独收起属性检查器并支持全屏；主回路、PE、控制和通信使用不同线宽、颜色、图层和文字标识。每周只读任务检查已批准资料链接并收集标准、EOL/PCN、替代料和调试经验候选，始终执行 `CANDIDATE → REVIEWED → APPROVED` 人工晋级，不自动修改生产规则。
 - **2.7 最终产物反读与回路闭环**：新增 G049 最终 SVG 独立解析，对每段导线、跨线、端子、符号、文字、命中层和页面骨架逐项回指 Drawing IR；新增 DXF `ENTITIES + EVSE_IR XDATA` 独立反读。辅助正负回路、线圈回流、公共端和 PE 沿真实 circuit 追踪到同一物理电源输出对，不能再用同名网络或缓存 PASS 自证。
 - **2.7 图面与交付**：接触器只画当前页面真实存在的主触点、线圈和反馈 PIN，不补画 A1/A2 或抑制器；功能区增加无导线占用的标题带，采用短标题和确定性文字碰撞审计。折叠控制台时同时隐藏复核详情、工程抽屉和页脚，1280×720 实测图纸窗高由 219px 提升到 535px；适页时图纸居中。CLI/Web 另提供 BOM、逐 PIN 接线表、RFQ 澄清表和审计证据四件套。
+- **2.7.1 电气导线实线契约**：SVG 与 DXF 中全部真实电气连接统一为连续实线，控制和通信仍由颜色、图层、线宽及文字区分。新增 G050 / PAGE-Q13 阻断闸门，独立反读最终图元及继承线型；任何承载 `route/net/circuit` 的虚线都会禁止页面和项目交付。机械联动、光耦光路和辅助分区边界仍可使用虚线。
 
 平台总架构、AI 权限、BOM 审批和领域扩展边界见 [SchematicForge 平台底座](docs/SCHEMATICFORGE-PLATFORM-ARCHITECTURE.md)。本轮三方取舍与可证明边界见 [2.7 三方源码复核集成](docs/EVSE-2.7-REFERENCE-INTEGRATION.md)。P0–P3、2.2–2.5 的历史基线分别见 [P0–P3 架构与安全边界](docs/P0-P3-ARCHITECTURE.md)、[P0–P3 验收报告](docs/P0-P3-VERIFICATION.md)、[控制导引与输出诊断验收](docs/FUNCTIONAL-SAFETY-VERIFICATION.md)、[216 矩阵验收报告](docs/P2-DRAWING-IR-VERIFICATION.md)、[用户项目图纸证据与在线编辑阶段报告](docs/USER-PROJECT-EVIDENCE-EDITOR.md)、[2.3 验收报告](docs/EVSE-2.3-VERIFICATION.md)、[Claude 参考集成说明](docs/CLAUDE-EDA-REFERENCE-INTEGRATION.md)、[2.4 验收报告](docs/EVSE-2.4-VERIFICATION.md) 与 [2.5 验收报告](docs/EVSE-2.5-VERIFICATION.md)。
 

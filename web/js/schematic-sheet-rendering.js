@@ -32,7 +32,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function (root, nodeDependencies) {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const SCHEMA = 'SCHEMATIC-SHEET-RENDERING/1.0';
   const PAGE_MODEL_SCHEMA = 'SCHEMATIC-GRAPHICAL-PROJECTION/1.0';
   const DEFAULT_MAX_ENDPOINTS = 14;
@@ -506,6 +506,8 @@
     }
     const renderedGeometry = dependencies.renderedSvgAudit.audit(svgText, ir,
       root && root.SYM && root.SYM.C || {});
+    const electricalConductorLineStyle =
+      dependencies.renderedSvgAudit.auditElectricalConductorLineStyle(svgText, ir);
     const visualQuality = dependencies.visualQualityAudit.audit(ir);
     const offPageLabelClearance =
       dependencies.visualQualityAudit.auditOffPageConnectorLabelClearance(ir);
@@ -552,6 +554,9 @@
     add('PAGE-Q12-OFFPAGE-LABEL-CLEARANCE', offPageLabelClearance.ok === true, 'BLOCKING',
       '每个跨页续接属性文字必须与小三角、短引线、端子及同组相邻属性文字保持最小净距；无法证明时禁止交付。',
       offPageLabelClearance.findings || []);
+    add('PAGE-Q13-ELECTRICAL-CONDUCTOR-SOLID', electricalConductorLineStyle.ok === true, 'BLOCKING',
+      '所有带 route/net/circuit 身份的电气连接线必须为连续实线；虚线只允许用于机械联动、光路和辅助边界。',
+      electricalConductorLineStyle.findings || []);
 
     const blocking = checks.filter((item) => !item.ok && item.severity === 'BLOCKING');
     const review = checks.filter((item) => !item.ok && item.severity === 'REVIEW');
@@ -564,7 +569,8 @@
       freshGeometry: Object.freeze(freshGeometry),
       renderedGeometry,
       visualQuality,
-      offPageLabelClearance
+      offPageLabelClearance,
+      electricalConductorLineStyle
     });
   }
 
@@ -586,7 +592,8 @@
       quality.status === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'PASS';
     return Object.freeze({ status, allowed: status !== 'BLOCKED', drawing, quality, coverage,
       renderedGeometry: quality.renderedGeometry, visualQuality: quality.visualQuality,
-      offPageLabelClearance: quality.offPageLabelClearance });
+      offPageLabelClearance: quality.offPageLabelClearance,
+      electricalConductorLineStyle: quality.electricalConductorLineStyle });
   }
 
   function compilePage(result, documentValue, sheetId, options) {

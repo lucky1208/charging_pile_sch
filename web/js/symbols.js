@@ -35,8 +35,8 @@ window.SYM = (function () {
     { name: 'EVSE-DC', color: 1, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '充电直流主回路' },
     { name: 'EVSE-ESS', color: 30, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '储能直流回路' },
     { name: 'EVSE-AUX', color: 4, linetype: 'CONTINUOUS', lineweightMm: 0.25, purpose: '辅助直流电源 24V/12V' },
-    { name: 'EVSE-CTL', color: 8, linetype: 'DASHED', lineweightMm: 0.18, purpose: '控制、联锁与采样信号' },
-    { name: 'EVSE-COMM', color: 6, linetype: 'DASHED', lineweightMm: 0.18, purpose: '通信总线与后台链路' },
+    { name: 'EVSE-CTL', color: 8, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '控制、联锁与采样信号（电气连接实线）' },
+    { name: 'EVSE-COMM', color: 6, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '通信总线与后台链路（电气连接实线）' },
     { name: 'EVSE-PE', color: 3, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '保护接地与等电位' }
   ];
 

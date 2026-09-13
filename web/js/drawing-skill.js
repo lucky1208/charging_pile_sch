@@ -8,7 +8,7 @@ window.EVSE_DRAWING_SKILL = (function () {
   'use strict';
 
   const ID = 'EVSE-MODEL-DRAWING-INTEGRITY-SKILL';
-  const VERSION = '3.3.0';
+  const VERSION = '3.4.0';
   const BASIS_STATUS = 'EDEM_V4_AND_GEOMETRY_IR—PROFESSIONAL_REVIEW_REQUIRED';
   const DRAWING_KEY = 'ev-schematic';
   const SOURCE_LIBRARY = Object.freeze([
@@ -19,6 +19,7 @@ window.EVSE_DRAWING_SKILL = (function () {
   const RULES = Object.freeze([
     { id: 'ERC-086', group: 'model', enforcement: 'BLOCKING', text: '辅助正极与回流须到达同一物理电源输出对；未映射驱动公共端必须显式待核。' },
     { id: 'G049', group: 'coverage', enforcement: 'BLOCKING', text: '独立读取最终 SVG 的导线、跳线、端子与符号几何，必须与当前 Drawing IR 完全相符。' },
+    { id: 'G050', group: 'presentation', enforcement: 'BLOCKING', text: '全部电气连接导线必须使用连续实线；虚线不得承载 route/net/circuit。' },
     { id: 'ERC-001', group: 'model', enforcement: 'BLOCKING', text: '设备、物理端子和受控器件定义必须完整且唯一。' },
     { id: 'ERC-010', group: 'model', enforcement: 'BLOCKING', text: '网络必须引用存在的精确端子，且一个物理端子只能属于一个电气网络。' },
     { id: 'ERC-020', group: 'model', enforcement: 'BLOCKING', text: '网络类别、电气域、相别、极性、电压和协议必须兼容。' },
@@ -331,12 +332,18 @@ window.EVSE_DRAWING_SKILL = (function () {
     add('G049-RENDERED-SVG', 'G049', renderedGeometry.ok === true,
       '独立读取最终 SVG 的真实导线、跨线、端子、符号与页面骨架，并与 Drawing IR 逐项核对。',
       renderedGeometry.errors || []);
+    const conductorStyle = renderedAuditor && typeof renderedAuditor.auditElectricalConductorLineStyle === 'function'
+      ? renderedAuditor.auditElectricalConductorLineStyle(text, ir)
+      : { ok: false, findings: [{ code: 'SVG_ELECTRICAL_CONDUCTOR_STYLE_AUDITOR_MISSING' }] };
+    add('G050-ELECTRICAL-CONDUCTOR-SOLID', 'G050', conductorStyle.ok === true,
+      '全部实际电气连接线必须为连续实线；机械联动、光路与辅助边界不属于本规则的导线范围。',
+      conductorStyle.findings || []);
 
     const blocking = checks.filter((item) => !item.ok && item.severity === 'ERROR');
     return {
       drawingKey, profile: profile.id, status: blocking.length ? 'BLOCKED' : 'CHECKED', checks,
       blockingCount: blocking.length, evaluatedRuleIds: unique(checks.map((item) => item.ruleId)),
-      coverage, currentGeometry, renderedGeometry, geometryHash: expectedHash || null
+      coverage, currentGeometry, renderedGeometry, conductorStyle, geometryHash: expectedHash || null
     };
   }
 

@@ -53,6 +53,12 @@ test('renders the six functional sheets from one immutable authoritative EDEM', 
       check.code === 'PAGE-Q12-OFFPAGE-LABEL-CLEARANCE');
     assert.equal(connectorClearance.ok, true, page.sheetId);
     assert.equal(connectorClearance.severity, 'BLOCKING', page.sheetId);
+    const conductorStyle = page.pageGate.quality.checks.find((check) =>
+      check.code === 'PAGE-Q13-ELECTRICAL-CONDUCTOR-SOLID');
+    assert.ok(conductorStyle, page.sheetId + ' must execute PAGE-Q13');
+    assert.equal(conductorStyle.ok, true, page.sheetId);
+    assert.equal(conductorStyle.severity, 'BLOCKING', page.sheetId);
+    assert.equal(page.pageGate.electricalConductorLineStyle.status, 'PASS', page.sheetId);
     assert.equal(page.pageGate.offPageLabelClearance.status, 'PASS', page.sheetId);
     assert.equal(page.pageGate.coverage.ok, true, page.sheetId);
     assert.equal(page.pageGate.coverage.exactGlobalEndpoints, true, page.sheetId);
@@ -64,6 +70,51 @@ test('renders the six functional sheets from one immutable authoritative EDEM', 
     page.compiled.drawingIR.devices.forEach((device) => {
       assert.ok(device.bbox.height <= 300,
         page.sheetId + ' ' + device.id + ' exceeds the fan-out graphic height budget: ' + device.bbox.height);
+    });
+  });
+});
+
+test('PAGE-Q13 blocks a dashed electrical route at page and project level', () => {
+  const built = result({ outputKw: 120, moduleKw: 40, gunCount: 2, essEnabled: false });
+  const rendered = SHEETS.buildDocument(built);
+  const page = rendered.pages.find((candidate) => candidate.compiled.drawingIR.routes.length > 0);
+  assert.ok(page, 'fixture must contain a routed page');
+  const line = /<line\b(?=[^>]*\bdata-route=")[^>]*\/>/.exec(page.svg);
+  assert.ok(line, 'fixture must contain a visible electrical route line');
+  const dashedLine = line[0].replace('/>', ' stroke-dasharray="4 2"/>');
+  const dashedSvg = page.svg.replace(line[0], dashedLine);
+
+  const gate = SHEETS.evaluatePage(built, rendered.document, page.sheetId, page.compiled, dashedSvg);
+  const q13 = gate.quality.checks.find((check) =>
+    check.code === 'PAGE-Q13-ELECTRICAL-CONDUCTOR-SOLID');
+  assert.ok(q13);
+  assert.equal(q13.ok, false);
+  assert.equal(q13.severity, 'BLOCKING');
+  assert.equal(gate.electricalConductorLineStyle.status, 'BLOCKED');
+  assert.ok(q13.evidence.some((finding) => finding.code === 'SVG_ELECTRICAL_CONDUCTOR_DASHED'));
+  assert.equal(gate.status, 'BLOCKED');
+  assert.equal(gate.allowed, false);
+
+  const replacement = Object.freeze(Object.assign({}, page, { svg: dashedSvg, pageGate: gate }));
+  const reevaluated = SHEETS.evaluateDocument(built, rendered, { [page.sheetId]: replacement });
+  assert.equal(reevaluated.status, 'BLOCKED');
+  assert.equal(reevaluated.projectGate.status, 'BLOCKED');
+  assert.ok(reevaluated.projectGate.blockedSheetIds.includes(page.sheetId));
+});
+
+test('all authoritative CTL and COMM CAD layer manifests require CONTINUOUS line type', () => {
+  const built = result({ essEnabled: false, gunCount: 1 });
+  const manifests = [
+    ['design-model', win.EVSE_DESIGN.CAD_LAYER_MANIFEST],
+    ['generated-document', built.design.documentControl.cadLayerManifest],
+    ['symbols', win.SYM.CAD_LAYER_MANIFEST],
+    ['dxf-export', win.EVSE_DXF.layerManifest()]
+  ];
+  manifests.forEach(([owner, manifest]) => {
+    ['EVSE-CTL', 'EVSE-COMM'].forEach((layerName) => {
+      const layer = manifest.find((candidate) => candidate.name === layerName);
+      assert.ok(layer, owner + ' must declare ' + layerName);
+      assert.equal(layer.linetype, 'CONTINUOUS', owner + ' ' + layerName);
     });
   });
 });

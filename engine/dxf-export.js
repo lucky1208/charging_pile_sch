@@ -18,7 +18,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '2.0.0';
+  const VERSION = '2.1.0';
   const DRAWING_IR_SCHEMA = 'evse-drawing-ir/v1';
   const MANIFEST_SCHEMA = 'EVSE-DXF-IR-MANIFEST/2.0';
   const LEGACY_MANIFEST_SCHEMA = 'EVSE-DXF-MANIFEST/1.0';
@@ -33,8 +33,8 @@
     { name: 'EVSE-DC', color: 1, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '充电直流主回路' },
     { name: 'EVSE-ESS', color: 30, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '储能直流回路' },
     { name: 'EVSE-AUX', color: 4, linetype: 'CONTINUOUS', lineweightMm: 0.25, purpose: '辅助直流电源 24V/12V' },
-    { name: 'EVSE-CTL', color: 8, linetype: 'DASHED', lineweightMm: 0.18, purpose: '控制、联锁与采样信号' },
-    { name: 'EVSE-COMM', color: 6, linetype: 'DASHED', lineweightMm: 0.18, purpose: '通信总线与后台链路' },
+    { name: 'EVSE-CTL', color: 8, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '控制、联锁与采样信号（电气连接实线）' },
+    { name: 'EVSE-COMM', color: 6, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '通信总线与后台链路（电气连接实线）' },
     { name: 'EVSE-PE', color: 3, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '保护接地与等电位' },
     { name: 'EVSE-MARKER', color: 7, linetype: 'CONTINUOUS', lineweightMm: 0.25, purpose: '连接点与非连接跨线标记' }
   ];
@@ -115,7 +115,7 @@
     if (color === '#ea580c' || color === '#b45309') return 'EVSE-ESS';
     if (color === '#0e7490' || color === '#0284c7' || color === '#0ea5e9') return 'EVSE-AUX';
     if (color === '#7c3aed' || color === '#6d28d9') return 'EVSE-COMM';
-    if (color === '#475569' && dashed) return 'EVSE-CTL';
+    if (color === '#475569') return 'EVSE-CTL';
     if (color === '#16a34a' || color === '#15803d') return 'EVSE-PE';
     return 'EVSE-EQPT';
   }
@@ -125,7 +125,12 @@
     const dash = inherited(node, 'stroke-dasharray');
     const strokeWidth = number(inherited(node, 'stroke-width'), definition.lineweightMm / Math.sqrt(sx * sy));
     const mm = Math.max(definition.lineweightMm || 0.18, strokeWidth * Math.sqrt(sx * sy));
-    return { linetype: dash ? 'DASHED' : (definition.linetype || 'CONTINUOUS'), lineweight: validLayerweight(mm, definition.lineweightMm || 0.25) };
+    const electricalRoute = Boolean(inherited(node, 'data-route'));
+    return {
+      linetype: electricalRoute ? 'CONTINUOUS' :
+        (dash ? 'DASHED' : (definition.linetype || 'CONTINUOUS')),
+      lineweight: validLayerweight(mm, definition.lineweightMm || 0.25)
+    };
   }
 
   function parsePoints(value) {
@@ -251,6 +256,8 @@
       if (name) definitions.set(name, Object.assign({}, layerDefinition(name), layer, { name }));
     });
     const required = new Set(FALLBACK_LAYER_MANIFEST.map((layer) => layer.name));
+    const electricalRouteLayers = new Set((Array.isArray(ir.routes) ? ir.routes : [])
+      .map((route) => String(route && route.layer || '')).filter(Boolean));
     (Array.isArray(ir.layers) ? ir.layers : []).forEach((layer) => required.add(String(layer && (layer.id || layer.name) || '')));
     (Array.isArray(ir.primitives) ? ir.primitives : []).forEach((primitive) => required.add(String(primitive && primitive.layer || '')));
     required.delete('');
@@ -260,7 +267,11 @@
       return {
         name,
         color: Math.max(1, Math.min(255, Math.floor(number(source.color, 7)))),
-        linetype: source.linetype === 'DASHED' ? 'DASHED' : 'CONTINUOUS',
+        /* A caller-supplied CAD manifest may style non-electrical graphics,
+           but it can never turn a layer carrying an electrical route into a
+           dashed conductor. */
+        linetype: electricalRouteLayers.has(name) ? 'CONTINUOUS' :
+          (source.linetype === 'DASHED' ? 'DASHED' : 'CONTINUOUS'),
         lineweightMm: Math.max(0.13, number(source.lineweightMm, 0.25)),
         purpose: String(source.purpose || '')
       };
@@ -553,7 +564,7 @@
         0, type,
         100, 'AcDbEntity',
         8, layer,
-        6, primitive.dash ? 'DASHED' : style.linetype,
+        6, primitive.routeId ? 'CONTINUOUS' : (primitive.dash ? 'DASHED' : style.linetype),
         370, style.lineweight,
         ...geometry,
         ...xdata(trace)

@@ -15,7 +15,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   const APP_ID = 'EVSE_IR';
   const IR_SCHEMA = 'evse-drawing-ir/v1';
   const EPSILON = 1e-7;
@@ -236,6 +236,10 @@
         if (String(main.trace[key] || '') !== String(value || '')) add('DXF_PRIMITIVE_IDENTITY', id, key);
       });
       if (first(main.entity, 8, '') !== String(primitive.layer || 'EVSE-EQPT')) add('DXF_LAYER_MISMATCH', id);
+      if (primitive.routeId && first(main.entity, 6, '') !== 'CONTINUOUS') {
+        add('DXF_ELECTRICAL_CONDUCTOR_DASHED', id,
+          'Electrical route entities must use DXF linetype CONTINUOUS.');
+      }
       const kind = String(primitive.kind || '').toLowerCase();
       const wantedType = kind === 'polyline' || kind === 'rect' ? 'LWPOLYLINE' :
         kind === 'port' || kind === 'junction' || kind === 'circle' ? 'CIRCLE' :

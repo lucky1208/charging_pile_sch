@@ -484,7 +484,7 @@ window.EVSE_COLOR_SCHEME = (function () {
   'use strict';
 
   const ID = 'EVSE-COLOR-SCHEME';
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
 
   const CATEGORIES = Object.freeze([
     { id: 'ac', color: '#92400e', dxf: 34, basis: '项目屏显棕；导体识别按项目采用的 IEC 60445 / GB/T 6995 版次复核', label: '交流电源回路（相线）' },
@@ -492,8 +492,8 @@ window.EVSE_COLOR_SCHEME = (function () {
     { id: 'dc', color: '#dc2626', dxf: 1, basis: '项目屏显红；极性必须同时由 DC± 与端子语义标识', label: '充电直流回路' },
     { id: 'ess', color: '#ea580c', dxf: 30, basis: '项目约定·橙（区分充电直流）', label: '储能直流回路' },
     { id: 'aux', color: '#0e7490', dxf: 4, basis: '项目约定·青（安全特低电压域）', label: '辅助电源 DC24V/12V' },
-    { id: 'ctl', color: '#475569', dxf: 8, basis: '项目约定·灰+虚线=非功率控制/联锁/采样', label: '控制/联锁/采样信号' },
-    { id: 'comm', color: '#7c3aed', dxf: 6, basis: '项目约定·紫+虚线=通信总线', label: '通信总线/后台链路' },
+    { id: 'ctl', color: '#475569', dxf: 8, basis: '项目约定·灰色实线=非功率控制/联锁/采样；电气连接不得使用虚线', label: '控制/联锁/采样信号' },
+    { id: 'comm', color: '#7c3aed', dxf: 6, basis: '项目约定·紫色实线=通信总线；电气连接不得使用虚线', label: '通信总线/后台链路' },
     { id: 'pe', color: '#15803d', dxf: 3, basis: '项目屏显绿；PE 必须同时由符号/文字标识，实际导体绿黄要求按项目标准复核', label: '保护接地 PE/等电位' },
     { id: 'saf', color: '#dc2626', dxf: 1, basis: 'ISO 3864 安全红', label: '安全器件（急停/消防/浪涌）' },
     { id: 'warn', color: '#ca8a04', dxf: 40, basis: '项目约定·琥珀=状态指示/警示', label: '状态指示/警示' },
@@ -2438,8 +2438,8 @@ window.SYM = (function () {
     { name: 'EVSE-DC', color: 1, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '充电直流主回路' },
     { name: 'EVSE-ESS', color: 30, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '储能直流回路' },
     { name: 'EVSE-AUX', color: 4, linetype: 'CONTINUOUS', lineweightMm: 0.25, purpose: '辅助直流电源 24V/12V' },
-    { name: 'EVSE-CTL', color: 8, linetype: 'DASHED', lineweightMm: 0.18, purpose: '控制、联锁与采样信号' },
-    { name: 'EVSE-COMM', color: 6, linetype: 'DASHED', lineweightMm: 0.18, purpose: '通信总线与后台链路' },
+    { name: 'EVSE-CTL', color: 8, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '控制、联锁与采样信号（电气连接实线）' },
+    { name: 'EVSE-COMM', color: 6, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '通信总线与后台链路（电气连接实线）' },
     { name: 'EVSE-PE', color: 3, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '保护接地与等电位' }
   ];
 
@@ -5383,8 +5383,8 @@ window.EVSE_DESIGN = (function () {
     { name: 'EVSE-DC', color: 1, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '充电直流导体' },
     { name: 'EVSE-ESS', color: 30, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '储能直流导体' },
     { name: 'EVSE-AUX', color: 4, linetype: 'CONTINUOUS', lineweightMm: 0.25, purpose: '24V/12V 辅助电源及各自回路' },
-    { name: 'EVSE-CTL', color: 8, linetype: 'DASHED', lineweightMm: 0.18, purpose: '控制与安全联锁' },
-    { name: 'EVSE-COMM', color: 6, linetype: 'DASHED', lineweightMm: 0.18, purpose: '通信总线' },
+    { name: 'EVSE-CTL', color: 8, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '控制与安全联锁（电气连接实线）' },
+    { name: 'EVSE-COMM', color: 6, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '通信总线（电气连接实线）' },
     { name: 'EVSE-PE', color: 3, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '保护接地；不得与功能地或直流负极合并' }
   ];
 
@@ -9862,7 +9862,7 @@ window.EVSE_ERC = (function () {
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const EPSILON = 0.001;
   const SHAPE_TAGS = new Set(['line', 'path', 'circle', 'rect', 'polyline', 'polygon', 'text', 'ellipse']);
   const ACTIVE_TAGS = new Set(['style', 'script', 'use', 'foreignObject', 'image', 'animate', 'animateTransform', 'set']);
@@ -9979,10 +9979,148 @@ window.EVSE_ERC = (function () {
       'EVSE-DC': [C.dc, 2.4, ''],
       'EVSE-ESS': [C.ess, 2.4, ''],
       'EVSE-AUX': [C.aux, 1.7, ''],
-      'EVSE-CTL': [C.ctl, 1.25, '8 4'],
-      'EVSE-COMM': [C.comm, 1.25, '2.5 3'],
+      'EVSE-CTL': [C.ctl, 1.25, ''],
+      'EVSE-COMM': [C.comm, 1.25, ''],
       'EVSE-PE': [C.pe, 2.6, '']
     }[layer] || [C.ink, 1.2, ''];
+  }
+
+  function inheritedDash(node) {
+    for (let current = node; current; current = current.parent) {
+      if (Object.hasOwn(current.attrs || {}, 'style')) {
+        const match = /(?:^|;)\s*stroke-dasharray\s*:\s*([^;]*)/i.exec(String(current.attrs.style || ''));
+        if (match) return { present: true, value: String(match[1] || '').trim() };
+      }
+      if (Object.hasOwn(current.attrs || {}, 'stroke-dasharray')) {
+        return { present: true, value: String(current.attrs['stroke-dasharray'] || '').trim() };
+      }
+    }
+    return { present: false, value: '' };
+  }
+
+  function isSolidDash(state) {
+    /* Absence uses SVG's solid-line initial value; exact "none" is also
+       solid.  An explicitly empty attribute is invalid presentation syntax
+       and cannot prove that a dashed ancestor has been overridden. */
+    return !state.present || state.value.toLowerCase() === 'none';
+  }
+
+  /* G050 / PAGE-Q13: independently inspect the final SVG presentation,
+     instead of trusting the renderer's layer table.  Dashed mechanical
+     linkages and annotation boundaries remain valid because only shapes
+     carrying a real data-route identity are electrical conductors. */
+  function auditElectricalConductorLineStyle(markup, ir) {
+    const findings = [];
+    const add = (code, routeId, detail) => {
+      if (findings.length < 200) findings.push(Object.freeze({
+        code, routeId: routeId || '', detail: detail == null ? '' : detail
+      }));
+    };
+    const routes = ir && Array.isArray(ir.routes) ? ir.routes : null;
+    if (!routes) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', 'Drawing IR routes are unavailable.');
+      return Object.freeze({ version: VERSION, status: 'BLOCKED', ok: false,
+        blockingCount: findings.length, findings: Object.freeze(findings),
+        stats: Object.freeze({ expectedRoutes: 0, renderedRoutes: 0, renderedPieces: 0,
+          dashedPieces: 0, tracedPrimitives: 0, dashedIrPrimitives: 0 }),
+        scope: 'FINAL_SVG_ELECTRICAL_CONDUCTOR_LINE_STYLE', ruleId: 'G050' });
+    }
+    let nodes;
+    try { nodes = parse(markup); }
+    catch (error) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', error.message);
+      return Object.freeze({ version: VERSION, status: 'BLOCKED', ok: false,
+        blockingCount: findings.length, findings: Object.freeze(findings),
+        stats: Object.freeze({ expectedRoutes: routes.length, renderedRoutes: 0, renderedPieces: 0,
+          dashedPieces: 0, tracedPrimitives: 0, dashedIrPrimitives: 0 }),
+        scope: 'FINAL_SVG_ELECTRICAL_CONDUCTOR_LINE_STYLE', ruleId: 'G050' });
+    }
+    const graph = nodes.find((node) => node.attrs.id === 'EVSE-DRAWING-IR');
+    if (!graph) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', 'EVSE-DRAWING-IR is missing.');
+      return Object.freeze({ version: VERSION, status: 'BLOCKED', ok: false,
+        blockingCount: findings.length, findings: Object.freeze(findings),
+        stats: Object.freeze({ expectedRoutes: routes.length, renderedRoutes: 0, renderedPieces: 0,
+          dashedPieces: 0, tracedPrimitives: 0, dashedIrPrimitives: 0 }),
+        scope: 'FINAL_SVG_ELECTRICAL_CONDUCTOR_LINE_STYLE', ruleId: 'G050' });
+    }
+    if (nodes.some((node) => node.tag === 'style')) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '',
+        'Embedded CSS can override conductor line style and is not allowed in the controlled SVG vocabulary.');
+    }
+    const inside = (node) => {
+      for (let current = node; current; current = current.parent) if (current === graph) return true;
+      return false;
+    };
+    const routeIds = new Set();
+    let invalidRouteIds = false;
+    routes.forEach((route) => {
+      const id = String(route && route.id || '');
+      if (!id || routeIds.has(id)) invalidRouteIds = true;
+      if (id) routeIds.add(id);
+    });
+    if (invalidRouteIds) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', 'Drawing IR route identities are empty or duplicated.');
+    }
+    if (!Array.isArray(ir.primitives)) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', 'Drawing IR primitives are unavailable.');
+    }
+    const piecesByRoute = new Map();
+    let renderedPieces = 0;
+    let dashedPieces = 0;
+    const tracedPrimitives = (Array.isArray(ir.primitives) ? ir.primitives : []).filter((primitive) =>
+      primitive && primitive.kind !== 'text' && (primitive.routeId || primitive.netId || primitive.circuitId ||
+        primitive.bridgeRouteId || Array.isArray(primitive.routeIds) && primitive.routeIds.length));
+    let dashedIrPrimitives = 0;
+    tracedPrimitives.forEach((primitive) => {
+      const dash = String(primitive.dash == null ? '' : primitive.dash).trim();
+      if (dash && dash.toLowerCase() !== 'none') {
+        dashedIrPrimitives += 1;
+        add('IR_ELECTRICAL_CONDUCTOR_DASHED', String(primitive.routeId || primitive.bridgeRouteId || ''),
+          'Trace-bearing Drawing IR primitive ' + String(primitive.id || 'UNKNOWN') +
+          ' requests dash="' + dash + '".');
+      }
+    });
+    nodes.filter((node) => inside(node) && ['line', 'path', 'polyline'].includes(node.tag) &&
+      Object.hasOwn(node.attrs, 'data-route')).forEach((node) => {
+      renderedPieces += 1;
+      const routeId = String(node.attrs['data-route'] || '');
+      piecesByRoute.set(routeId, Number(piecesByRoute.get(routeId) || 0) + 1);
+      if (!routeIds.has(routeId)) {
+        add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', routeId, 'Rendered route is not present in Drawing IR.');
+      }
+      const dash = inheritedDash(node);
+      if (!isSolidDash(dash)) {
+        dashedPieces += 1;
+        add('SVG_ELECTRICAL_CONDUCTOR_DASHED', routeId,
+          'Electrical route uses stroke-dasharray="' + dash.value +
+          '"; every electrical conductor must be solid.');
+      }
+    });
+    routeIds.forEach((routeId) => {
+      if (!piecesByRoute.has(routeId)) {
+        add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', routeId,
+          'No rendered conductor piece proves this route is solid.');
+      }
+    });
+    const unique = [];
+    const seen = new Set();
+    findings.sort((left, right) => compare(left.code, right.code) || compare(left.routeId, right.routeId) ||
+      compare(left.detail, right.detail)).forEach((finding) => {
+      const key = finding.code + '|' + finding.routeId + '|' + finding.detail;
+      if (!seen.has(key)) { seen.add(key); unique.push(finding); }
+    });
+    return Object.freeze({
+      version: VERSION,
+      status: unique.length ? 'BLOCKED' : 'PASS',
+      ok: unique.length === 0,
+      blockingCount: unique.length,
+      findings: Object.freeze(unique),
+      stats: Object.freeze({ expectedRoutes: routeIds.size, renderedRoutes: piecesByRoute.size,
+        renderedPieces, dashedPieces, tracedPrimitives: tracedPrimitives.length, dashedIrPrimitives }),
+      scope: 'FINAL_SVG_ELECTRICAL_CONDUCTOR_LINE_STYLE',
+      ruleId: 'G050'
+    });
   }
 
   function audit(markup, ir, colors) {
@@ -10418,7 +10556,7 @@ window.EVSE_ERC = (function () {
     });
   }
 
-  return Object.freeze({ VERSION, EPSILON, parse, audit });
+  return Object.freeze({ VERSION, EPSILON, parse, auditElectricalConductorLineStyle, audit });
 });
 
 /* ===== engine/drawing-skill.js ===== */
@@ -10432,7 +10570,7 @@ window.EVSE_DRAWING_SKILL = (function () {
   'use strict';
 
   const ID = 'EVSE-MODEL-DRAWING-INTEGRITY-SKILL';
-  const VERSION = '3.3.0';
+  const VERSION = '3.4.0';
   const BASIS_STATUS = 'EDEM_V4_AND_GEOMETRY_IR—PROFESSIONAL_REVIEW_REQUIRED';
   const DRAWING_KEY = 'ev-schematic';
   const SOURCE_LIBRARY = Object.freeze([
@@ -10443,6 +10581,7 @@ window.EVSE_DRAWING_SKILL = (function () {
   const RULES = Object.freeze([
     { id: 'ERC-086', group: 'model', enforcement: 'BLOCKING', text: '辅助正极与回流须到达同一物理电源输出对；未映射驱动公共端必须显式待核。' },
     { id: 'G049', group: 'coverage', enforcement: 'BLOCKING', text: '独立读取最终 SVG 的导线、跳线、端子与符号几何，必须与当前 Drawing IR 完全相符。' },
+    { id: 'G050', group: 'presentation', enforcement: 'BLOCKING', text: '全部电气连接导线必须使用连续实线；虚线不得承载 route/net/circuit。' },
     { id: 'ERC-001', group: 'model', enforcement: 'BLOCKING', text: '设备、物理端子和受控器件定义必须完整且唯一。' },
     { id: 'ERC-010', group: 'model', enforcement: 'BLOCKING', text: '网络必须引用存在的精确端子，且一个物理端子只能属于一个电气网络。' },
     { id: 'ERC-020', group: 'model', enforcement: 'BLOCKING', text: '网络类别、电气域、相别、极性、电压和协议必须兼容。' },
@@ -10755,12 +10894,18 @@ window.EVSE_DRAWING_SKILL = (function () {
     add('G049-RENDERED-SVG', 'G049', renderedGeometry.ok === true,
       '独立读取最终 SVG 的真实导线、跨线、端子、符号与页面骨架，并与 Drawing IR 逐项核对。',
       renderedGeometry.errors || []);
+    const conductorStyle = renderedAuditor && typeof renderedAuditor.auditElectricalConductorLineStyle === 'function'
+      ? renderedAuditor.auditElectricalConductorLineStyle(text, ir)
+      : { ok: false, findings: [{ code: 'SVG_ELECTRICAL_CONDUCTOR_STYLE_AUDITOR_MISSING' }] };
+    add('G050-ELECTRICAL-CONDUCTOR-SOLID', 'G050', conductorStyle.ok === true,
+      '全部实际电气连接线必须为连续实线；机械联动、光路与辅助边界不属于本规则的导线范围。',
+      conductorStyle.findings || []);
 
     const blocking = checks.filter((item) => !item.ok && item.severity === 'ERROR');
     return {
       drawingKey, profile: profile.id, status: blocking.length ? 'BLOCKED' : 'CHECKED', checks,
       blockingCount: blocking.length, evaluatedRuleIds: unique(checks.map((item) => item.ruleId)),
-      coverage, currentGeometry, renderedGeometry, geometryHash: expectedHash || null
+      coverage, currentGeometry, renderedGeometry, conductorStyle, geometryHash: expectedHash || null
     };
   }
 
@@ -10837,7 +10982,7 @@ window.EVSE_DRAWING_SKILL = (function () {
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   const APP_ID = 'EVSE_IR';
   const IR_SCHEMA = 'evse-drawing-ir/v1';
   const EPSILON = 1e-7;
@@ -11058,6 +11203,10 @@ window.EVSE_DRAWING_SKILL = (function () {
         if (String(main.trace[key] || '') !== String(value || '')) add('DXF_PRIMITIVE_IDENTITY', id, key);
       });
       if (first(main.entity, 8, '') !== String(primitive.layer || 'EVSE-EQPT')) add('DXF_LAYER_MISMATCH', id);
+      if (primitive.routeId && first(main.entity, 6, '') !== 'CONTINUOUS') {
+        add('DXF_ELECTRICAL_CONDUCTOR_DASHED', id,
+          'Electrical route entities must use DXF linetype CONTINUOUS.');
+      }
       const kind = String(primitive.kind || '').toLowerCase();
       const wantedType = kind === 'polyline' || kind === 'rect' ? 'LWPOLYLINE' :
         kind === 'port' || kind === 'junction' || kind === 'circle' ? 'CIRCLE' :
@@ -18277,7 +18426,7 @@ window.drawPile = function drawPile(result) {
   (typeof globalThis !== 'undefined' ? globalThis : this), function (root, nodeDependencies) {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const SCHEMA = 'SCHEMATIC-SHEET-RENDERING/1.0';
   const PAGE_MODEL_SCHEMA = 'SCHEMATIC-GRAPHICAL-PROJECTION/1.0';
   const DEFAULT_MAX_ENDPOINTS = 14;
@@ -18751,6 +18900,8 @@ window.drawPile = function drawPile(result) {
     }
     const renderedGeometry = dependencies.renderedSvgAudit.audit(svgText, ir,
       root && root.SYM && root.SYM.C || {});
+    const electricalConductorLineStyle =
+      dependencies.renderedSvgAudit.auditElectricalConductorLineStyle(svgText, ir);
     const visualQuality = dependencies.visualQualityAudit.audit(ir);
     const offPageLabelClearance =
       dependencies.visualQualityAudit.auditOffPageConnectorLabelClearance(ir);
@@ -18797,6 +18948,9 @@ window.drawPile = function drawPile(result) {
     add('PAGE-Q12-OFFPAGE-LABEL-CLEARANCE', offPageLabelClearance.ok === true, 'BLOCKING',
       '每个跨页续接属性文字必须与小三角、短引线、端子及同组相邻属性文字保持最小净距；无法证明时禁止交付。',
       offPageLabelClearance.findings || []);
+    add('PAGE-Q13-ELECTRICAL-CONDUCTOR-SOLID', electricalConductorLineStyle.ok === true, 'BLOCKING',
+      '所有带 route/net/circuit 身份的电气连接线必须为连续实线；虚线只允许用于机械联动、光路和辅助边界。',
+      electricalConductorLineStyle.findings || []);
 
     const blocking = checks.filter((item) => !item.ok && item.severity === 'BLOCKING');
     const review = checks.filter((item) => !item.ok && item.severity === 'REVIEW');
@@ -18809,7 +18963,8 @@ window.drawPile = function drawPile(result) {
       freshGeometry: Object.freeze(freshGeometry),
       renderedGeometry,
       visualQuality,
-      offPageLabelClearance
+      offPageLabelClearance,
+      electricalConductorLineStyle
     });
   }
 
@@ -18831,7 +18986,8 @@ window.drawPile = function drawPile(result) {
       quality.status === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'PASS';
     return Object.freeze({ status, allowed: status !== 'BLOCKED', drawing, quality, coverage,
       renderedGeometry: quality.renderedGeometry, visualQuality: quality.visualQuality,
-      offPageLabelClearance: quality.offPageLabelClearance });
+      offPageLabelClearance: quality.offPageLabelClearance,
+      electricalConductorLineStyle: quality.electricalConductorLineStyle });
   }
 
   function compilePage(result, documentValue, sheetId, options) {
@@ -19034,7 +19190,7 @@ window.drawPile = function drawPile(result) {
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.3.0';
+  const VERSION = '1.4.0';
 
   class SvgIRRenderError extends Error {
     constructor(code, message, details) {
@@ -19071,8 +19227,11 @@ window.drawPile = function drawPile(result) {
       'EVSE-DC': { color: C.dc, width: 2.4 },
       'EVSE-ESS': { color: C.ess, width: 2.4 },
       'EVSE-AUX': { color: C.aux, width: 1.7 },
-      'EVSE-CTL': { color: C.ctl, width: 1.25, dash: '8 4' },
-      'EVSE-COMM': { color: C.comm, width: 1.25, dash: '2.5 3' },
+      /* Every route is a physical electrical connection and must therefore
+         remain continuous.  Signal classes are distinguished by colour and
+         layer metadata, never by breaking the conductor into a dashed line. */
+      'EVSE-CTL': { color: C.ctl, width: 1.25 },
+      'EVSE-COMM': { color: C.comm, width: 1.25 },
       'EVSE-PE': { color: C.pe, width: 2.6 }
     };
     return styles[layer] || { color: C.ink, width: 1.2 };
@@ -19528,8 +19687,8 @@ window.drawPile = function drawPile(result) {
       { color: S.C.dc, thick: 2.4, label: 'POWER_DC 充电直流回路（DC+/DC−）' },
       { color: S.C.ess, thick: 2.4, label: 'POWER_DC_ESS 储能直流回路' },
       { color: S.C.aux, thick: 1.7, label: 'POWER_DC_AUX 24V / 12V 辅助电源' },
-      { color: S.C.ctl, thick: 1.25, dash: '8 4', label: 'SIGNAL_CTRL 控制/联锁/采样（长虚线）' },
-      { color: S.C.comm, thick: 1.25, dash: '2.5 3', label: 'SIGNAL_COMM 通信（短虚线）' },
+      { color: S.C.ctl, thick: 1.25, label: 'SIGNAL_CTRL 控制/联锁/采样（实线）' },
+      { color: S.C.comm, thick: 1.25, label: 'SIGNAL_COMM 通信（实线）' },
       { color: S.C.pe, thick: 2.6, label: 'PE 保护接地排 / 等电位连接' }
     ], includeSchedule ? scheduleX : Math.max(40, width - 450), legendY,
     includeSchedule ? scheduleWidth : 400) + '</g>';
@@ -19576,7 +19735,7 @@ window.drawPile = function drawPile(result) {
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '2.0.0';
+  const VERSION = '2.1.0';
   const DRAWING_IR_SCHEMA = 'evse-drawing-ir/v1';
   const MANIFEST_SCHEMA = 'EVSE-DXF-IR-MANIFEST/2.0';
   const LEGACY_MANIFEST_SCHEMA = 'EVSE-DXF-MANIFEST/1.0';
@@ -19591,8 +19750,8 @@ window.drawPile = function drawPile(result) {
     { name: 'EVSE-DC', color: 1, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '充电直流主回路' },
     { name: 'EVSE-ESS', color: 30, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '储能直流回路' },
     { name: 'EVSE-AUX', color: 4, linetype: 'CONTINUOUS', lineweightMm: 0.25, purpose: '辅助直流电源 24V/12V' },
-    { name: 'EVSE-CTL', color: 8, linetype: 'DASHED', lineweightMm: 0.18, purpose: '控制、联锁与采样信号' },
-    { name: 'EVSE-COMM', color: 6, linetype: 'DASHED', lineweightMm: 0.18, purpose: '通信总线与后台链路' },
+    { name: 'EVSE-CTL', color: 8, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '控制、联锁与采样信号（电气连接实线）' },
+    { name: 'EVSE-COMM', color: 6, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '通信总线与后台链路（电气连接实线）' },
     { name: 'EVSE-PE', color: 3, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '保护接地与等电位' },
     { name: 'EVSE-MARKER', color: 7, linetype: 'CONTINUOUS', lineweightMm: 0.25, purpose: '连接点与非连接跨线标记' }
   ];
@@ -19673,7 +19832,7 @@ window.drawPile = function drawPile(result) {
     if (color === '#ea580c' || color === '#b45309') return 'EVSE-ESS';
     if (color === '#0e7490' || color === '#0284c7' || color === '#0ea5e9') return 'EVSE-AUX';
     if (color === '#7c3aed' || color === '#6d28d9') return 'EVSE-COMM';
-    if (color === '#475569' && dashed) return 'EVSE-CTL';
+    if (color === '#475569') return 'EVSE-CTL';
     if (color === '#16a34a' || color === '#15803d') return 'EVSE-PE';
     return 'EVSE-EQPT';
   }
@@ -19683,7 +19842,12 @@ window.drawPile = function drawPile(result) {
     const dash = inherited(node, 'stroke-dasharray');
     const strokeWidth = number(inherited(node, 'stroke-width'), definition.lineweightMm / Math.sqrt(sx * sy));
     const mm = Math.max(definition.lineweightMm || 0.18, strokeWidth * Math.sqrt(sx * sy));
-    return { linetype: dash ? 'DASHED' : (definition.linetype || 'CONTINUOUS'), lineweight: validLayerweight(mm, definition.lineweightMm || 0.25) };
+    const electricalRoute = Boolean(inherited(node, 'data-route'));
+    return {
+      linetype: electricalRoute ? 'CONTINUOUS' :
+        (dash ? 'DASHED' : (definition.linetype || 'CONTINUOUS')),
+      lineweight: validLayerweight(mm, definition.lineweightMm || 0.25)
+    };
   }
 
   function parsePoints(value) {
@@ -19809,6 +19973,8 @@ window.drawPile = function drawPile(result) {
       if (name) definitions.set(name, Object.assign({}, layerDefinition(name), layer, { name }));
     });
     const required = new Set(FALLBACK_LAYER_MANIFEST.map((layer) => layer.name));
+    const electricalRouteLayers = new Set((Array.isArray(ir.routes) ? ir.routes : [])
+      .map((route) => String(route && route.layer || '')).filter(Boolean));
     (Array.isArray(ir.layers) ? ir.layers : []).forEach((layer) => required.add(String(layer && (layer.id || layer.name) || '')));
     (Array.isArray(ir.primitives) ? ir.primitives : []).forEach((primitive) => required.add(String(primitive && primitive.layer || '')));
     required.delete('');
@@ -19818,7 +19984,11 @@ window.drawPile = function drawPile(result) {
       return {
         name,
         color: Math.max(1, Math.min(255, Math.floor(number(source.color, 7)))),
-        linetype: source.linetype === 'DASHED' ? 'DASHED' : 'CONTINUOUS',
+        /* A caller-supplied CAD manifest may style non-electrical graphics,
+           but it can never turn a layer carrying an electrical route into a
+           dashed conductor. */
+        linetype: electricalRouteLayers.has(name) ? 'CONTINUOUS' :
+          (source.linetype === 'DASHED' ? 'DASHED' : 'CONTINUOUS'),
         lineweightMm: Math.max(0.13, number(source.lineweightMm, 0.25)),
         purpose: String(source.purpose || '')
       };
@@ -20111,7 +20281,7 @@ window.drawPile = function drawPile(result) {
         0, type,
         100, 'AcDbEntity',
         8, layer,
-        6, primitive.dash ? 'DASHED' : style.linetype,
+        6, primitive.routeId ? 'CONTINUOUS' : (primitive.dash ? 'DASHED' : style.linetype),
         370, style.lineweight,
         ...geometry,
         ...xdata(trace)

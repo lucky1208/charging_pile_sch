@@ -16,7 +16,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const EPSILON = 0.001;
   const SHAPE_TAGS = new Set(['line', 'path', 'circle', 'rect', 'polyline', 'polygon', 'text', 'ellipse']);
   const ACTIVE_TAGS = new Set(['style', 'script', 'use', 'foreignObject', 'image', 'animate', 'animateTransform', 'set']);
@@ -133,10 +133,148 @@
       'EVSE-DC': [C.dc, 2.4, ''],
       'EVSE-ESS': [C.ess, 2.4, ''],
       'EVSE-AUX': [C.aux, 1.7, ''],
-      'EVSE-CTL': [C.ctl, 1.25, '8 4'],
-      'EVSE-COMM': [C.comm, 1.25, '2.5 3'],
+      'EVSE-CTL': [C.ctl, 1.25, ''],
+      'EVSE-COMM': [C.comm, 1.25, ''],
       'EVSE-PE': [C.pe, 2.6, '']
     }[layer] || [C.ink, 1.2, ''];
+  }
+
+  function inheritedDash(node) {
+    for (let current = node; current; current = current.parent) {
+      if (Object.hasOwn(current.attrs || {}, 'style')) {
+        const match = /(?:^|;)\s*stroke-dasharray\s*:\s*([^;]*)/i.exec(String(current.attrs.style || ''));
+        if (match) return { present: true, value: String(match[1] || '').trim() };
+      }
+      if (Object.hasOwn(current.attrs || {}, 'stroke-dasharray')) {
+        return { present: true, value: String(current.attrs['stroke-dasharray'] || '').trim() };
+      }
+    }
+    return { present: false, value: '' };
+  }
+
+  function isSolidDash(state) {
+    /* Absence uses SVG's solid-line initial value; exact "none" is also
+       solid.  An explicitly empty attribute is invalid presentation syntax
+       and cannot prove that a dashed ancestor has been overridden. */
+    return !state.present || state.value.toLowerCase() === 'none';
+  }
+
+  /* G050 / PAGE-Q13: independently inspect the final SVG presentation,
+     instead of trusting the renderer's layer table.  Dashed mechanical
+     linkages and annotation boundaries remain valid because only shapes
+     carrying a real data-route identity are electrical conductors. */
+  function auditElectricalConductorLineStyle(markup, ir) {
+    const findings = [];
+    const add = (code, routeId, detail) => {
+      if (findings.length < 200) findings.push(Object.freeze({
+        code, routeId: routeId || '', detail: detail == null ? '' : detail
+      }));
+    };
+    const routes = ir && Array.isArray(ir.routes) ? ir.routes : null;
+    if (!routes) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', 'Drawing IR routes are unavailable.');
+      return Object.freeze({ version: VERSION, status: 'BLOCKED', ok: false,
+        blockingCount: findings.length, findings: Object.freeze(findings),
+        stats: Object.freeze({ expectedRoutes: 0, renderedRoutes: 0, renderedPieces: 0,
+          dashedPieces: 0, tracedPrimitives: 0, dashedIrPrimitives: 0 }),
+        scope: 'FINAL_SVG_ELECTRICAL_CONDUCTOR_LINE_STYLE', ruleId: 'G050' });
+    }
+    let nodes;
+    try { nodes = parse(markup); }
+    catch (error) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', error.message);
+      return Object.freeze({ version: VERSION, status: 'BLOCKED', ok: false,
+        blockingCount: findings.length, findings: Object.freeze(findings),
+        stats: Object.freeze({ expectedRoutes: routes.length, renderedRoutes: 0, renderedPieces: 0,
+          dashedPieces: 0, tracedPrimitives: 0, dashedIrPrimitives: 0 }),
+        scope: 'FINAL_SVG_ELECTRICAL_CONDUCTOR_LINE_STYLE', ruleId: 'G050' });
+    }
+    const graph = nodes.find((node) => node.attrs.id === 'EVSE-DRAWING-IR');
+    if (!graph) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', 'EVSE-DRAWING-IR is missing.');
+      return Object.freeze({ version: VERSION, status: 'BLOCKED', ok: false,
+        blockingCount: findings.length, findings: Object.freeze(findings),
+        stats: Object.freeze({ expectedRoutes: routes.length, renderedRoutes: 0, renderedPieces: 0,
+          dashedPieces: 0, tracedPrimitives: 0, dashedIrPrimitives: 0 }),
+        scope: 'FINAL_SVG_ELECTRICAL_CONDUCTOR_LINE_STYLE', ruleId: 'G050' });
+    }
+    if (nodes.some((node) => node.tag === 'style')) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '',
+        'Embedded CSS can override conductor line style and is not allowed in the controlled SVG vocabulary.');
+    }
+    const inside = (node) => {
+      for (let current = node; current; current = current.parent) if (current === graph) return true;
+      return false;
+    };
+    const routeIds = new Set();
+    let invalidRouteIds = false;
+    routes.forEach((route) => {
+      const id = String(route && route.id || '');
+      if (!id || routeIds.has(id)) invalidRouteIds = true;
+      if (id) routeIds.add(id);
+    });
+    if (invalidRouteIds) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', 'Drawing IR route identities are empty or duplicated.');
+    }
+    if (!Array.isArray(ir.primitives)) {
+      add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', '', 'Drawing IR primitives are unavailable.');
+    }
+    const piecesByRoute = new Map();
+    let renderedPieces = 0;
+    let dashedPieces = 0;
+    const tracedPrimitives = (Array.isArray(ir.primitives) ? ir.primitives : []).filter((primitive) =>
+      primitive && primitive.kind !== 'text' && (primitive.routeId || primitive.netId || primitive.circuitId ||
+        primitive.bridgeRouteId || Array.isArray(primitive.routeIds) && primitive.routeIds.length));
+    let dashedIrPrimitives = 0;
+    tracedPrimitives.forEach((primitive) => {
+      const dash = String(primitive.dash == null ? '' : primitive.dash).trim();
+      if (dash && dash.toLowerCase() !== 'none') {
+        dashedIrPrimitives += 1;
+        add('IR_ELECTRICAL_CONDUCTOR_DASHED', String(primitive.routeId || primitive.bridgeRouteId || ''),
+          'Trace-bearing Drawing IR primitive ' + String(primitive.id || 'UNKNOWN') +
+          ' requests dash="' + dash + '".');
+      }
+    });
+    nodes.filter((node) => inside(node) && ['line', 'path', 'polyline'].includes(node.tag) &&
+      Object.hasOwn(node.attrs, 'data-route')).forEach((node) => {
+      renderedPieces += 1;
+      const routeId = String(node.attrs['data-route'] || '');
+      piecesByRoute.set(routeId, Number(piecesByRoute.get(routeId) || 0) + 1);
+      if (!routeIds.has(routeId)) {
+        add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', routeId, 'Rendered route is not present in Drawing IR.');
+      }
+      const dash = inheritedDash(node);
+      if (!isSolidDash(dash)) {
+        dashedPieces += 1;
+        add('SVG_ELECTRICAL_CONDUCTOR_DASHED', routeId,
+          'Electrical route uses stroke-dasharray="' + dash.value +
+          '"; every electrical conductor must be solid.');
+      }
+    });
+    routeIds.forEach((routeId) => {
+      if (!piecesByRoute.has(routeId)) {
+        add('SVG_ELECTRICAL_CONDUCTOR_STYLE_NOT_PROVEN', routeId,
+          'No rendered conductor piece proves this route is solid.');
+      }
+    });
+    const unique = [];
+    const seen = new Set();
+    findings.sort((left, right) => compare(left.code, right.code) || compare(left.routeId, right.routeId) ||
+      compare(left.detail, right.detail)).forEach((finding) => {
+      const key = finding.code + '|' + finding.routeId + '|' + finding.detail;
+      if (!seen.has(key)) { seen.add(key); unique.push(finding); }
+    });
+    return Object.freeze({
+      version: VERSION,
+      status: unique.length ? 'BLOCKED' : 'PASS',
+      ok: unique.length === 0,
+      blockingCount: unique.length,
+      findings: Object.freeze(unique),
+      stats: Object.freeze({ expectedRoutes: routeIds.size, renderedRoutes: piecesByRoute.size,
+        renderedPieces, dashedPieces, tracedPrimitives: tracedPrimitives.length, dashedIrPrimitives }),
+      scope: 'FINAL_SVG_ELECTRICAL_CONDUCTOR_LINE_STYLE',
+      ruleId: 'G050'
+    });
   }
 
   function audit(markup, ir, colors) {
@@ -572,5 +710,5 @@
     });
   }
 
-  return Object.freeze({ VERSION, EPSILON, parse, audit });
+  return Object.freeze({ VERSION, EPSILON, parse, auditElectricalConductorLineStyle, audit });
 });

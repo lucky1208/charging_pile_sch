@@ -13,7 +13,7 @@
   (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '1.3.0';
+  const VERSION = '1.4.0';
 
   class SvgIRRenderError extends Error {
     constructor(code, message, details) {
@@ -50,8 +50,11 @@
       'EVSE-DC': { color: C.dc, width: 2.4 },
       'EVSE-ESS': { color: C.ess, width: 2.4 },
       'EVSE-AUX': { color: C.aux, width: 1.7 },
-      'EVSE-CTL': { color: C.ctl, width: 1.25, dash: '8 4' },
-      'EVSE-COMM': { color: C.comm, width: 1.25, dash: '2.5 3' },
+      /* Every route is a physical electrical connection and must therefore
+         remain continuous.  Signal classes are distinguished by colour and
+         layer metadata, never by breaking the conductor into a dashed line. */
+      'EVSE-CTL': { color: C.ctl, width: 1.25 },
+      'EVSE-COMM': { color: C.comm, width: 1.25 },
       'EVSE-PE': { color: C.pe, width: 2.6 }
     };
     return styles[layer] || { color: C.ink, width: 1.2 };
@@ -507,8 +510,8 @@
       { color: S.C.dc, thick: 2.4, label: 'POWER_DC 充电直流回路（DC+/DC−）' },
       { color: S.C.ess, thick: 2.4, label: 'POWER_DC_ESS 储能直流回路' },
       { color: S.C.aux, thick: 1.7, label: 'POWER_DC_AUX 24V / 12V 辅助电源' },
-      { color: S.C.ctl, thick: 1.25, dash: '8 4', label: 'SIGNAL_CTRL 控制/联锁/采样（长虚线）' },
-      { color: S.C.comm, thick: 1.25, dash: '2.5 3', label: 'SIGNAL_COMM 通信（短虚线）' },
+      { color: S.C.ctl, thick: 1.25, label: 'SIGNAL_CTRL 控制/联锁/采样（实线）' },
+      { color: S.C.comm, thick: 1.25, label: 'SIGNAL_COMM 通信（实线）' },
       { color: S.C.pe, thick: 2.6, label: 'PE 保护接地排 / 等电位连接' }
     ], includeSchedule ? scheduleX : Math.max(40, width - 450), legendY,
     includeSchedule ? scheduleWidth : 400) + '</g>';

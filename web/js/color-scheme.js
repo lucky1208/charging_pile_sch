@@ -15,7 +15,7 @@ window.EVSE_COLOR_SCHEME = (function () {
   'use strict';
 
   const ID = 'EVSE-COLOR-SCHEME';
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
 
   const CATEGORIES = Object.freeze([
     { id: 'ac', color: '#92400e', dxf: 34, basis: '项目屏显棕；导体识别按项目采用的 IEC 60445 / GB/T 6995 版次复核', label: '交流电源回路（相线）' },
@@ -23,8 +23,8 @@ window.EVSE_COLOR_SCHEME = (function () {
     { id: 'dc', color: '#dc2626', dxf: 1, basis: '项目屏显红；极性必须同时由 DC± 与端子语义标识', label: '充电直流回路' },
     { id: 'ess', color: '#ea580c', dxf: 30, basis: '项目约定·橙（区分充电直流）', label: '储能直流回路' },
     { id: 'aux', color: '#0e7490', dxf: 4, basis: '项目约定·青（安全特低电压域）', label: '辅助电源 DC24V/12V' },
-    { id: 'ctl', color: '#475569', dxf: 8, basis: '项目约定·灰+虚线=非功率控制/联锁/采样', label: '控制/联锁/采样信号' },
-    { id: 'comm', color: '#7c3aed', dxf: 6, basis: '项目约定·紫+虚线=通信总线', label: '通信总线/后台链路' },
+    { id: 'ctl', color: '#475569', dxf: 8, basis: '项目约定·灰色实线=非功率控制/联锁/采样；电气连接不得使用虚线', label: '控制/联锁/采样信号' },
+    { id: 'comm', color: '#7c3aed', dxf: 6, basis: '项目约定·紫色实线=通信总线；电气连接不得使用虚线', label: '通信总线/后台链路' },
     { id: 'pe', color: '#15803d', dxf: 3, basis: '项目屏显绿；PE 必须同时由符号/文字标识，实际导体绿黄要求按项目标准复核', label: '保护接地 PE/等电位' },
     { id: 'saf', color: '#dc2626', dxf: 1, basis: 'ISO 3864 安全红', label: '安全器件（急停/消防/浪涌）' },
     { id: 'warn', color: '#ca8a04', dxf: 40, basis: '项目约定·琥珀=状态指示/警示', label: '状态指示/警示' },

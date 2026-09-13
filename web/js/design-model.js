@@ -22,8 +22,8 @@ window.EVSE_DESIGN = (function () {
     { name: 'EVSE-DC', color: 1, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '充电直流导体' },
     { name: 'EVSE-ESS', color: 30, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '储能直流导体' },
     { name: 'EVSE-AUX', color: 4, linetype: 'CONTINUOUS', lineweightMm: 0.25, purpose: '24V/12V 辅助电源及各自回路' },
-    { name: 'EVSE-CTL', color: 8, linetype: 'DASHED', lineweightMm: 0.18, purpose: '控制与安全联锁' },
-    { name: 'EVSE-COMM', color: 6, linetype: 'DASHED', lineweightMm: 0.18, purpose: '通信总线' },
+    { name: 'EVSE-CTL', color: 8, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '控制与安全联锁（电气连接实线）' },
+    { name: 'EVSE-COMM', color: 6, linetype: 'CONTINUOUS', lineweightMm: 0.18, purpose: '通信总线（电气连接实线）' },
     { name: 'EVSE-PE', color: 3, linetype: 'CONTINUOUS', lineweightMm: 0.35, purpose: '保护接地；不得与功能地或直流负极合并' }
   ];
 
