@@ -108,33 +108,64 @@ test('工程工作台提供真实适页、锚点缩放、平移、全屏和可�
   assert.match(html, /\.diagram-box svg\{display:block;max-width:none;margin-inline:auto\}/);
 });
 
-test('参数、元器件库和 PIN 检查器组成图纸上方的响应式横向控制台', () => {
-  assert.match(html, /\.wrap\{display:grid;grid-template-rows:auto minmax\(0,1fr\);grid-template-columns:minmax\(0,1fr\)/);
-  assert.match(html, /class="config-groups"/);
-  assert.ok((html.match(/class="config-group(?:\s|"|$)/g) || []).length >= 6);
+test('全部参数打散为等高紧凑网格，生成前不挂载固定图纸工作区', () => {
+  assert.match(html, /\.wrap\{display:flex;flex-direction:column/);
+  assert.match(html, /\.config-field-grid\{display:grid;grid-template-columns:repeat\(8,minmax\(0,1fr\)\);grid-auto-flow:row/);
+  assert.match(html, /\.config-field-grid \.form-group\{display:grid;grid-template-rows:11px 28px;[^}]*height:40px/);
+  assert.match(html, /class="config-field-grid"/);
+  assert.match(html, /\.config-field-contents\{display:contents\}/);
+  assert.doesNotMatch(html, /class="config-group(?:\s|"|$)/);
+  assert.doesNotMatch(html, /class="config-disclosure(?:\s|"|$)/);
+  const fieldIds = ['f-name', 'f-site', 'f-archetype', 'f-standard', 'f-output', 'f-module', 'f-guns',
+    'f-gun-current', 'f-window', 'f-acv', 'f-supply', 'f-ess', 'f-ess-kwh', 'f-ess-power',
+    'f-ess-chem', 'f-ess-coupling', 'f-thermal', 'f-ip', 'f-ambient', 'f-backend', 'f-hmi',
+    'f-pay', 'f-eff', 'f-pf', 'f-lowtemp', 'f-model', 'f-pref', 'f-ai-access-token', 'f-nl'
+  ];
+  const gridStart = html.indexOf('<div class="config-field-grid"');
+  const gridEnd = html.indexOf('<div class="config-status-line">', gridStart);
+  const gridMarkup = html.slice(gridStart, gridEnd);
+  fieldIds.forEach((id) => {
+    assert.equal((html.match(new RegExp('id="' + id + '"', 'g')) || []).length, 1, id + ' must appear exactly once');
+    assert.match(gridMarkup, new RegExp('id="' + id + '"'), id + ' must remain inside the flat parameter grid');
+  });
+  assert.match(html, /<textarea class="form-input" id="f-nl" rows="1" maxlength="5000"/);
+  assert.match(html, /id="step-log" role="status" aria-live="polite"/);
+  assert.match(html, /class="workspace-column" id="workspace-column"[^>]*\bhidden\b/);
+  assert.match(html, /id="result-area" hidden/);
+  assert.doesNotMatch(html, /id="empty-hint"/);
   assert.match(html, /class="editor-top-console" id="editor-top-console"/);
   const consoleStart = html.indexOf('id="editor-top-console"');
   const drawingStart = html.indexOf('id="d-pile"');
   assert.ok(consoleStart >= 0 && drawingStart > consoleStart, 'editor console must precede the drawing canvas');
-  assert.match(html, /body\.config-collapsed \.wrap\{grid-template-rows:0 minmax\(0,1fr\)/);
-  assert.match(html, /#design-config-panel\{grid-row:1/);
-  assert.match(html, /\.workspace-column\{grid-row:2/);
-  assert.match(html, /#result-area\{[^}]*flex-direction:column;align-items:stretch/);
-  assert.match(html, /body\.config-collapsed \.workspace-column\{grid-row:2\}/);
-  assert.match(html, /body\.workspace-mode \.workspace-column\{grid-row:1\}/);
+  assert.match(html, /#result-area\{display:flex;[^}]*flex-direction:column;align-items:stretch/);
+  assert.match(html, /body\.has-result #design-config-panel\{max-height:34vh;overflow:auto/);
+  assert.match(html, /body\.has-result footer\{display:none\}/);
   assert.match(html, /body\.config-collapsed #design-config-panel,body\.config-collapsed \.editor-top-console\{display:none!important\}/);
   assert.match(html, /body\.config-collapsed #review-host,body\.config-collapsed \.editor-status,body\.config-collapsed footer\{display:none!important\}/);
   assert.match(html, /body\.inspector-collapsed #editor-inspector\{display:none!important\}/);
-  assert.match(html, /@media \(max-width:720px\)[\s\S]*\.config-groups\{grid-template-columns:1fr\}/);
+  assert.match(html, /@media \(min-width:1600px\)\{\.config-field-grid\{grid-template-columns:repeat\(10,minmax\(0,1fr\)\)\}\}/);
+  assert.match(html, /@media \(max-width:1180px\)[\s\S]*\.config-field-grid\{grid-template-columns:repeat\(6,minmax\(0,1fr\)\)\}/);
+  assert.match(html, /@media \(max-width:900px\)\{\.config-field-grid\{grid-template-columns:repeat\(4,minmax\(0,1fr\)\)\}\}/);
+  assert.match(html, /@media \(max-width:720px\)[\s\S]*\.config-field-grid\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)\}/);
+  assert.match(html, /@media \(max-width:520px\)\{\.config-field-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}\}/);
+  assert.match(html, /@media \(max-width:340px\)\{\.config-field-grid\{grid-template-columns:1fr\}\}/);
   assert.match(html, /\.editor-route-hit-target[^}]*stroke:transparent!important;stroke-width:12!important;pointer-events:stroke/);
   assert.equal((html.match(/<label class="form-label"(?![^>]*\bfor=)/g) || []).length, 0,
     'every form label must point to its control');
 });
 
 test('图纸首屏适配、分页编辑历史、编辑后项目闸门与 DXF 追溯信息均保持真实', () => {
-  const reveal = app.indexOf("$('result-area').style.display = 'flex'");
+  const revealWorkspace = app.indexOf('workspace.hidden = false');
+  const reveal = app.indexOf('resultArea.hidden = false', revealWorkspace);
+  const markReady = app.indexOf("document.body.classList.add('has-result')", reveal);
   const activate = app.indexOf('activateSchematicSheet(state.activeSheetId)', reveal);
-  assert.ok(reveal >= 0 && activate > reveal, 'result must be measurable before fit-to-page zoom');
+  assert.ok(revealWorkspace >= 0 && reveal > revealWorkspace && markReady > reveal && activate > markReady,
+    'workspace and result must be measurable before fit-to-page zoom');
+  const failureHandler = app.slice(app.indexOf('} catch (error) {', activate), app.indexOf('} finally {', activate));
+  assert.match(failureHandler, /workspace\.hidden = true;[\s\S]*resultArea\.hidden = true;[\s\S]*classList\.remove\('has-result'\)/,
+    'any post-generation exception must hide possibly inconsistent output, including after a previous successful run');
+  assert.match(app, /log\.style\.display = 'none';[\s\S]*workspace\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(app, /configPanel\.setAttribute\('aria-busy', 'true'\)[\s\S]*configPanel\.setAttribute\('aria-busy', 'false'\)/);
   assert.match(app, /pageEditorSessions\[sessionKey\]\s*\|\|\s*[\s\S]*api\.createSession/);
   assert.match(app, /state\.pageEditorSessions\[sessionKey\]\s*=\s*state\.editor/);
   assert.match(app, /pageApi\.evaluateDocument\(state\.R, state\.renderedSchematicDocument, state\.pageEdits\)/);

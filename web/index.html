@@ -11,6 +11,8 @@
     --text:#e6edf3; --text2:#8b9bb4; --cyan:#00f0ff; --blue:#58a6ff; --green:#3fb950;
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;
+    overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
   html,body{height:100%}
   body{background:var(--bg);color:var(--text);font-family:'Segoe UI','Microsoft YaHei',sans-serif;font-size:14px;
     display:flex;flex-direction:column;overflow:hidden}
@@ -21,35 +23,46 @@
   header h1{font-size:17px;font-weight:700}
   header h1 span{color:var(--cyan)}
   header .std{margin-left:auto;font-size:11px;color:var(--text2)}
-  .wrap{display:grid;grid-template-rows:auto minmax(0,1fr);grid-template-columns:minmax(0,1fr);gap:8px;
-    padding:8px 12px;max-width:none;width:100%;min-height:0;flex:1;overflow:hidden}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  [hidden]{display:none!important}
+  .wrap{display:flex;flex-direction:column;gap:7px;padding:7px 10px;max-width:none;width:100%;min-height:0;
+    flex:1;overflow:auto}
+  body.has-result .wrap{overflow:hidden}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
   .card h2{font-size:14px;margin-bottom:4px}
   .card .desc{font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:12px}
-  .form-group{margin-bottom:8px;break-inside:avoid}
-  .form-label{display:block;font-size:11px;color:var(--text2);margin-bottom:4px}
-  .form-input{width:100%;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
-    color:var(--text);font-size:13px;outline:none;font-family:inherit}
+  .form-group{margin:0;break-inside:avoid;min-width:0}
+  .form-label{display:block;font-size:10px;line-height:10px;color:var(--text2);margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .form-input{width:100%;min-height:28px;padding:3px 7px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;
+    color:var(--text);font-size:11px;outline:none;font-family:inherit}
   .form-input:focus{border-color:var(--cyan)}
   select.form-input{cursor:pointer}
-  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:6px}
   .section-title{font-size:11px;font-weight:700;color:#7fb8e8;margin:0 0 8px;padding-bottom:5px;
     border-bottom:1px solid var(--line);letter-spacing:.5px}
-  #design-config-panel{grid-row:1;padding:11px 13px;max-height:42vh;overflow:auto;scrollbar-gutter:stable}
-  .config-console-heading{display:grid;grid-template-columns:minmax(230px,.65fr) minmax(420px,1.35fr);gap:14px;
-    align-items:center;margin-bottom:9px;padding-bottom:8px;border-bottom:1px solid var(--line)}
-  .config-console-heading h2{margin:0}
-  .config-console-heading .desc{margin:0}
-  .config-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:9px;align-items:start}
-  .config-group{min-width:0;padding:9px 10px;border:1px solid #243955;border-radius:9px;background:var(--panel2)}
-  .config-group .engine-inputs{margin:0}
-  .config-group .review-box{margin-top:8px}
-  .config-actions{display:grid;gap:8px;align-content:start}
-  .btn-primary{width:100%;padding:12px;font-size:14px;font-weight:700;border-radius:10px;cursor:pointer;
-    background:linear-gradient(135deg,#0a4d8f,#0a3d6b);color:#fff;border:1px solid rgba(0,240,255,.4);margin-top:6px}
+  #design-config-panel{flex:0 0 auto;padding:6px 8px;overflow:visible}
+  body.has-result #design-config-panel{max-height:34vh;overflow:auto;scrollbar-gutter:stable}
+  .config-console-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;
+    padding-bottom:3px;border-bottom:1px solid var(--line)}
+  .config-heading-copy{display:flex;align-items:baseline;gap:10px;min-width:0}
+  .config-console-heading h2{margin:0;white-space:nowrap}
+  .config-console-heading .desc{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .config-layout-note{flex:0 0 auto;font-size:10px;color:#7fb8e8;white-space:nowrap}
+  .config-field-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));grid-auto-flow:row;gap:2px 5px;
+    align-items:stretch}
+  .config-field-grid .form-group{display:grid;grid-template-rows:11px 28px;align-content:start;height:40px;min-width:0}
+  .config-field-grid .form-input{height:28px;min-width:0}
+  .config-field-grid textarea.form-input{resize:none;overflow:auto;line-height:19px}
+  .config-field-contents{display:contents}
+  .config-generate-cell .btn-primary{height:28px;padding:3px 7px;white-space:nowrap;font-size:12px}
+  .config-status-line{display:grid;grid-template-columns:minmax(0,2fr) minmax(220px,1fr);gap:12px;margin-top:3px;
+    min-width:0;color:var(--text2);font-size:9px;line-height:1.4}
+  .config-status-line>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .config-status-line b{color:#7fb8e8;margin-right:5px}
+  .btn-primary{width:100%;padding:8px 14px;font-size:13px;font-weight:700;border-radius:7px;cursor:pointer;
+    background:linear-gradient(135deg,#0a4d8f,#0a3d6b);color:#fff;border:1px solid rgba(0,240,255,.4);margin:0}
   .btn-primary:hover{filter:brightness(1.15)}
-  .step-log{display:none;margin-top:12px;max-height:200px;overflow-y:auto;background:var(--panel2);
-    border:1px solid var(--line);border-radius:8px;padding:10px}
+  .step-log{display:none;margin-top:6px;max-height:120px;overflow-y:auto;background:var(--panel2);
+    border:1px solid var(--line);border-radius:7px;padding:7px 9px}
   .step{font-size:11px;padding:2px 0;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .step.running{color:#7fb8e8}.step.ok{color:var(--green)}.step.warn{color:#e3b341}
   .kpi-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px}
@@ -154,9 +167,8 @@
     color:var(--text2);font-size:11px;cursor:pointer;flex:0 0 auto}
   .sheet-tab.active{border-color:var(--cyan);color:var(--cyan);background:#0c2942}
   .sheet-tabs .state-tag{white-space:nowrap;flex:0 0 auto;align-self:center}
-  .workspace-column{grid-row:2;min-width:0;min-height:0;height:100%;overflow:auto;display:flex;flex-direction:column}
-  #result-area{height:100%;min-height:0;flex-direction:column;align-items:stretch}
-  #result-area[style*="display: block"]{display:flex!important}
+  .workspace-column{min-width:0;min-height:0;height:100%;overflow:auto;display:flex;flex:1;flex-direction:column}
+  #result-area{display:flex;height:100%;min-height:0;flex-direction:column;align-items:stretch}
   .engineering-panels{display:grid;gap:8px;margin-top:10px}
   .engineering-panel{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
   .engineering-panel>summary{cursor:pointer;padding:11px 13px;color:#7fb8e8;font-weight:700;font-size:12px}
@@ -173,9 +185,9 @@
   .panel-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
   .panel-note{font-size:10px;line-height:1.55;color:var(--text2);margin:5px 0 8px}
   .viewport-hint{font-size:10px;color:var(--text2);margin-left:auto;white-space:nowrap}
-  body.config-collapsed .wrap{grid-template-rows:0 minmax(0,1fr);gap:0;padding-top:4px}
+  body.has-result footer{display:none}
+  body.config-collapsed .wrap{gap:0;padding-top:4px}
   body.config-collapsed #design-config-panel,body.config-collapsed .editor-top-console{display:none!important}
-  body.config-collapsed .workspace-column{grid-row:2}
   body.config-collapsed .kpi-grid,body.config-collapsed .result-drawer{display:none}
   body.config-collapsed .engineering-panels,body.config-collapsed #ai-review-panel{display:none}
   body.config-collapsed #review-host,body.config-collapsed .editor-status,body.config-collapsed footer{display:none!important}
@@ -187,9 +199,8 @@
   body.inspector-collapsed .editor-top-console{grid-template-columns:minmax(0,1fr)}
   body.inspector-collapsed .editor-shell.active{grid-template-columns:minmax(0,1fr)}
   body.inspector-collapsed #editor-inspector{display:none!important}
-  body.workspace-mode .wrap{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr);max-width:none;padding:6px 10px}
+  body.workspace-mode .wrap{max-width:none;padding:6px 10px;overflow:hidden}
   body.workspace-mode #design-config-panel{display:none}
-  body.workspace-mode .workspace-column{grid-row:1}
   body.workspace-mode .editor-shell.active{grid-template-columns:minmax(0,1fr)}
   body.workspace-mode .editor-top-console{grid-template-columns:minmax(260px,.75fr) minmax(420px,1.5fr);max-height:190px}
   body.workspace-mode .editor-library{display:block!important}
@@ -200,19 +211,29 @@
   body.workspace-mode .kpi-grid,body.workspace-mode .result-drawer,body.workspace-mode .engineering-panels,
   body.workspace-mode #ai-review-panel{display:none}
   body.workspace-mode footer{display:none}
-  @media (max-width:1450px){.editor-top-console{grid-template-columns:minmax(260px,.8fr) minmax(360px,1.4fr)}}
+  @media (min-width:1600px){.config-field-grid{grid-template-columns:repeat(10,minmax(0,1fr))}}
+  @media (max-width:1180px){
+    .config-field-grid{grid-template-columns:repeat(6,minmax(0,1fr))}
+    .editor-top-console{grid-template-columns:minmax(260px,.8fr) minmax(360px,1.4fr)}
+  }
   @media (max-width:1050px){
-    body{overflow:auto}.wrap{height:auto;overflow:visible}.workspace-column{height:auto;overflow:visible}
-    #design-config-panel{max-height:none}.config-console-heading{grid-template-columns:1fr}.config-groups{grid-template-columns:repeat(2,minmax(0,1fr))}
+    body,body.has-result{overflow:auto}.wrap,body.has-result .wrap{height:auto;overflow:visible}.workspace-column{height:auto;overflow:visible}
+    #design-config-panel,body.has-result #design-config-panel{max-height:none;overflow:visible}
+    .config-console-heading{align-items:flex-start}.config-heading-copy{display:block}.config-layout-note{display:none}
     .editor-top-console{grid-template-columns:1fr;max-height:none}.editor-side{position:static;max-height:300px}
     .editor-shell{min-height:520px}.diagram-box{height:70vh;min-height:480px}
   }
+  @media (max-width:900px){.config-field-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
   footer{margin:24px;padding:12px;border-top:1px solid var(--line);font-size:11px;color:var(--text2);text-align:center;line-height:1.8}
   @media (max-width:720px){
-    header{flex-wrap:wrap;padding:8px 10px}.std{display:none}.wrap{padding:6px}.config-groups{grid-template-columns:1fr}
+    header{flex-wrap:wrap;padding:8px 10px}.std{display:none}.wrap{padding:6px}
+    .config-console-heading .desc{display:none}.config-field-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .config-status-line{grid-template-columns:1fr}
     .form-row{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}.review-controls{grid-template-columns:1fr}
     .editor-top-console{grid-template-columns:1fr}.diagram-actions{position:static}.viewport-hint{width:100%;margin-left:0;white-space:normal}
   }
+  @media (max-width:520px){.config-field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media (max-width:340px){.config-field-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -227,49 +248,51 @@
   <!-- ============ 上: 横向充电桩设计参数控制台 ============ -->
   <div class="card" id="design-config-panel">
     <div class="config-console-heading">
-      <h2>⚡ 充电桩设计控制台</h2>
-      <div class="desc">参数控制台位于图纸上方并按功能分组；点击右上角「收起上方控制台」可同时收起参数、元器件库与属性栏，让图纸占满工作区。AI 可辅助需求翻译、审图观察和资料检索，但不参与电气计算、接线、坐标、审批或签发。</div>
+      <div class="config-heading-copy">
+        <h2>⚡ 充电桩设计控制台</h2>
+        <div class="desc">全部参数已打散为等高单元，按工程流程从左到右、逐行向下连续排列。</div>
+      </div>
+      <span class="config-layout-note">无分组大框 · 自动补位 · 生成后可一键收起</span>
     </div>
-    <div class="config-groups">
-    <section class="config-group" aria-labelledby="config-basic-title">
 
-    <div class="section-title" id="config-basic-title">基本信息</div>
-    <div class="form-group"><label class="form-label" for="f-name">桩名称 / 项目</label>
+    <div class="config-field-grid" aria-label="充电桩全部设计参数">
+      <div class="form-group"><label class="form-label" for="f-name">项目 · 桩名称</label>
       <input type="text" class="form-input" id="f-name" value="充电桩"></div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label" for="f-site">站点</label>
+      <div class="form-group"><label class="form-label" for="f-site">项目 · 站点</label>
         <input type="text" class="form-input" id="f-site" value=""></div>
-      <div class="form-group"><label class="form-label" for="f-archetype">桩型</label>
+      <div class="form-group"><label class="form-label" for="f-archetype">项目 · 桩型</label>
         <select class="form-input" id="f-archetype">
           <option value="dc-integrated" selected>直流一体式</option>
           <option value="dc-split">直流分体式（功率柜 + 充电终端）</option>
           <option value="ac-dc-combo">交流一体式（AC + DC 双输出）</option>
           <option value="ess-mobile">储能移动充电桩（电池主供 + 多路径补电）</option>
         </select></div>
-    </div>
-
-    </section>
-    <section class="config-group" aria-labelledby="config-interface-title">
-    <div class="section-title" id="config-interface-title">充电标准与接口</div>
-    <div class="form-group"><label class="form-label" for="f-standard">充电桩类型（标准 / 接口 / 通信）</label>
+      <div class="form-group"><label class="form-label" for="f-standard">接口 · 标准 / 通信</label>
       <select class="form-input" id="f-standard">
         <option value="gb" selected>国标 GB/T — GB/T 20234.3 接口 + GB/T 27930 CAN</option>
         <option value="eu">欧标 CCS2 — IEC 62196-3 FF + DIN 70121 / ISO 15118</option>
         <option value="us">美标 CCS1 — IEC 62196-3 EE + SAE J1772 / ISO 15118</option>
         <option value="nacs">美标 NACS / SAE J3400 — PLC + CP/PP</option>
         <option value="chademo">日标 CHAdeMO — CAN + 独立启停/使能回路</option>
-      </select>
-      <div class="field-help" id="std-help"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label" for="f-guns">充电枪数量</label>
+      </select></div>
+      <div class="form-group"><label class="form-label" for="f-output">功率 · 总输出 (kW)</label>
+        <input type="number" class="form-input" id="f-output" value="120" min="20" step="10"></div>
+      <div class="form-group"><label class="form-label" for="f-module">功率 · 单模块 (kW)</label>
+        <select class="form-input" id="f-module">
+          <option value="15">15kW</option>
+          <option value="20">20kW</option>
+          <option value="30">30kW</option>
+          <option value="40" selected>40kW</option>
+          <option value="60">60kW 液冷</option>
+        </select></div>
+      <div class="form-group"><label class="form-label" for="f-guns">接口 · 充电枪数量</label>
         <select class="form-input" id="f-guns">
           <option value="1">1 把（单枪独占功率）</option>
           <option value="2" selected>2 把（功率动态分配）</option>
           <option value="3">3 把</option>
           <option value="4">4 把（一机多充）</option>
         </select></div>
-      <div class="form-group"><label class="form-label" for="f-gun-current">单枪最大电流 (A)</label>
+      <div class="form-group"><label class="form-label" for="f-gun-current">接口 · 单枪电流 (A)</label>
         <select class="form-input" id="f-gun-current">
           <option value="125">125A 常规风冷枪线</option>
           <option value="200">200A 常规风冷枪线</option>
@@ -278,158 +301,120 @@
           <option value="400">400A 液冷枪线</option>
           <option value="500">500A 液冷枪线（连接器型式专项确认）</option>
         </select></div>
-    </div>
-
-    </section>
-    <section class="config-group" aria-labelledby="config-power-title">
-    <div class="section-title" id="config-power-title">功率与电气规格</div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label" for="f-output">总输出功率 (kW)</label>
-        <input type="number" class="form-input" id="f-output" value="120" min="20" step="10"></div>
-      <div class="form-group"><label class="form-label" for="f-module">单模块功率 (kW)</label>
-        <select class="form-input" id="f-module">
-          <option value="15">15kW</option>
-          <option value="20">20kW</option>
-          <option value="30">30kW</option>
-          <option value="40" selected>40kW</option>
-          <option value="60">60kW 液冷</option>
-        </select></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label" for="f-window">输出电压范围</label>
+      <div class="form-group"><label class="form-label" for="f-window">功率 · 输出电压范围</label>
         <select class="form-input" id="f-window">
           <option value="200-750">200–750V</option>
           <option value="150-1000">150–1000V</option>
           <option value="200-1000" selected>200–1000V</option>
           <option value="500-1000">500–1000V 高压平台</option>
         </select></div>
-      <div class="form-group"><label class="form-label" for="f-acv">交流输入电压 (V)</label>
+      <div class="form-group"><label class="form-label" for="f-acv">进线 · 交流电压 (V)</label>
         <select class="form-input" id="f-acv">
           <option value="380">AC 380V 3P+N+PE</option>
           <option value="400">AC 400V 3P+N+PE</option>
           <option value="480">AC 480V 3P+PE</option>
         </select></div>
-    </div>
-    <div class="form-group"><label class="form-label" for="f-supply">供电方式</label>
-      <select class="form-input" id="f-supply">
-        <option value="grid">市电低压直供</option>
-        <option value="transformer" selected>专用变压器供电</option>
-        <option value="offgrid">储能离网为主 + 市电补电</option>
-      </select></div>
-
-    </section>
-    <section class="config-group" aria-labelledby="config-storage-title">
-    <div class="section-title" id="config-storage-title">储能配置</div>
-    <div class="form-group"><label class="form-label" for="f-ess">是否带储能</label>
-      <select class="form-input" id="f-ess">
-        <option value="1">带储能（削峰填谷 / 降低进线容量）</option>
-        <option value="0" selected>不带储能（全部功率由电网承担）</option>
-      </select></div>
-    <div id="ess-fields">
-      <div class="form-row">
-        <div class="form-group"><label class="form-label" for="f-ess-kwh">储能电池容量 (kWh)</label>
-          <input type="number" class="form-input" id="f-ess-kwh" value="200" min="20" step="10"></div>
-        <div class="form-group"><label class="form-label" for="f-ess-power">变换器功率 (kW)</label>
-          <input type="number" class="form-input" id="f-ess-power" value="120" min="10" step="10"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label" for="f-ess-chem">电池类型</label>
-          <select class="form-input" id="f-ess-chem">
+      <div class="form-group"><label class="form-label" for="f-supply">进线 · 供电方式</label>
+        <select class="form-input" id="f-supply">
+          <option value="grid">市电低压直供</option>
+          <option value="transformer" selected>专用变压器供电</option>
+          <option value="offgrid">储能离网为主 + 市电补电</option>
+        </select></div>
+      <div class="form-group"><label class="form-label" for="f-ess">储能 · 是否配置</label>
+        <select class="form-input" id="f-ess" aria-describedby="storage-guidance">
+          <option value="1">带储能（削峰填谷 / 降低进线容量）</option>
+          <option value="0" selected>不带储能（全部功率由电网承担）</option>
+        </select></div>
+      <div class="config-field-contents" id="ess-fields" hidden>
+        <div class="form-group"><label class="form-label" for="f-ess-kwh">储能 · 电池容量 (kWh)</label>
+          <input type="number" class="form-input" id="f-ess-kwh" value="200" min="20" step="10" aria-describedby="storage-guidance"></div>
+        <div class="form-group"><label class="form-label" for="f-ess-power">储能 · 变换器功率 (kW)</label>
+          <input type="number" class="form-input" id="f-ess-power" value="120" min="10" step="10" aria-describedby="storage-guidance"></div>
+        <div class="form-group"><label class="form-label" for="f-ess-chem">储能 · 电池类型</label>
+          <select class="form-input" id="f-ess-chem" aria-describedby="storage-guidance">
             <option value="lfp" selected>磷酸铁锂 LFP</option>
             <option value="nmc">三元 NMC</option>
           </select></div>
-        <div class="form-group"><label class="form-label" for="f-ess-coupling">耦合方式</label>
-          <select class="form-input" id="f-ess-coupling">
+        <div class="form-group"><label class="form-label" for="f-ess-coupling">储能 · 耦合方式</label>
+          <select class="form-input" id="f-ess-coupling" aria-describedby="storage-guidance">
             <option value="dc" selected>直流侧耦合（DC/DC）</option>
             <option value="ac">交流侧耦合（PCS）</option>
           </select></div>
       </div>
-      <div class="field-help">直流耦合转换级数少、效率高；交流耦合可并网/离网切换并兼容既有交流配电。并网批复、防孤岛与消防要求均须另行确认。</div>
-    </div>
 
-    </section>
-    <section class="config-group" aria-label="二次系统与工程边界">
-    <details class="engine-inputs" open>
-      <summary>二次系统、热管理与工程边界（建议项目阶段补齐）</summary>
-      <div class="field-help">未填项目资料时，引擎按明确标注的概念假设取值；这些输入不能替代短路、保护配合、EMC、温升或消防计算书。</div>
-      <div class="form-row" style="margin-top:9px">
-        <div class="form-group"><label class="form-label" for="f-thermal">热管理方式</label>
-          <select class="form-input" id="f-thermal">
+        <div class="form-group"><label class="form-label" for="f-thermal">二次 · 热管理方式</label>
+          <select class="form-input" id="f-thermal" aria-describedby="engineering-guidance">
             <option value="air">风冷（轴流风机 + 滤网）</option>
             <option value="liquid" selected>液冷（模块液冷机组）</option>
           </select></div>
-        <div class="form-group"><label class="form-label" for="f-ip">防护等级</label>
-          <select class="form-input" id="f-ip">
+        <div class="form-group"><label class="form-label" for="f-ip">环境 · 防护等级</label>
+          <select class="form-input" id="f-ip" aria-describedby="engineering-guidance">
             <option value="IP54" selected>IP54</option>
             <option value="IP55">IP55</option>
             <option value="IP65">IP65</option>
           </select></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label" for="f-ambient">工作温度</label>
-          <input type="text" class="form-input" id="f-ambient" value=""></div>
-        <div class="form-group"><label class="form-label" for="f-backend">后台协议</label>
+        <div class="form-group"><label class="form-label" for="f-ambient">环境 · 工作温度</label>
+          <input type="text" class="form-input" id="f-ambient" value="" aria-describedby="engineering-guidance"></div>
+        <div class="form-group"><label class="form-label" for="f-backend">通信 · 后台协议</label>
           <select class="form-input" id="f-backend">
             <option value="ocpp16">OCPP 1.6J</option>
             <option value="ocpp201">OCPP 2.0.1</option>
             <option value="private">运营商私有协议</option>
           </select></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label" for="f-hmi">显示屏尺寸</label>
+        <div class="form-group"><label class="form-label" for="f-hmi">人机 · 显示屏尺寸</label>
           <select class="form-input" id="f-hmi">
             <option value="7 英寸">7 英寸</option>
             <option value="10 英寸" selected>10 英寸</option>
             <option value="15 英寸">15 英寸</option>
           </select></div>
-        <div class="form-group"><label class="form-label" for="f-pay">支付与鉴权</label>
+        <div class="form-group"><label class="form-label" for="f-pay">人机 · 支付与鉴权</label>
           <select class="form-input" id="f-pay">
             <option value="扫码 / 刷卡" selected>扫码 + 刷卡</option>
             <option value="扫码">仅扫码</option>
             <option value="刷卡 / 即插即充">刷卡 + 即插即充</option>
           </select></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label" for="f-eff">模块效率（概念值）</label>
-          <input type="number" class="form-input" id="f-eff" value="0.95" min="0.85" max="0.99" step="0.01"></div>
-        <div class="form-group"><label class="form-label" for="f-pf">输入功率因数</label>
-          <input type="number" class="form-input" id="f-pf" value="0.99" min="0.8" max="1" step="0.01"></div>
-      </div>
-      <div class="form-group"><label class="form-label" for="f-lowtemp">低温加热</label>
-        <select class="form-input" id="f-lowtemp">
-          <option value="0" selected>不配置</option>
-          <option value="1">配置加热/除湿回路</option>
-        </select></div>
-    </details>
+        <div class="form-group"><label class="form-label" for="f-eff">校核 · 模块效率</label>
+          <input type="number" class="form-input" id="f-eff" value="0.95" min="0.85" max="0.99" step="0.01" aria-describedby="engineering-guidance"></div>
+        <div class="form-group"><label class="form-label" for="f-pf">校核 · 输入功率因数</label>
+          <input type="number" class="form-input" id="f-pf" value="0.99" min="0.8" max="1" step="0.01" aria-describedby="engineering-guidance"></div>
+        <div class="form-group"><label class="form-label" for="f-lowtemp">环境 · 低温加热</label>
+          <select class="form-input" id="f-lowtemp">
+            <option value="0" selected>不配置</option>
+            <option value="1">配置加热/除湿回路</option>
+          </select></div>
+          <div class="form-group"><label class="form-label" for="f-model">AI · 提供方</label>
+            <select class="form-input" id="f-model">
+              <option value="local" selected>本地规则解析（不发送文本）</option>
+              <option value="kimi">Kimi（服务端代理）</option>
+              <option value="deepseek">DeepSeek（服务端代理）</option>
+              <option value="glm">GLM（服务端代理）</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label" for="f-pref">选型 · 偏好</label>
+            <select class="form-input" id="f-pref">
+              <option value="balance" selected>均衡（性价比）</option>
+              <option value="cost">成本优先</option>
+              <option value="reliability">可靠性优先</option>
+            </select></div>
+          <div class="form-group"><label class="form-label" for="f-ai-access-token">AI · 受控访问令牌</label>
+            <input type="password" class="form-input" id="f-ai-access-token" autocomplete="off" spellcheck="false" aria-describedby="ai-guidance"
+              placeholder="站点管理员分配的访问令牌；不会写入方案包或浏览器存储"></div>
+          <div class="form-group"><label class="form-label" for="f-nl">AI · 自然语言需求</label>
+            <textarea class="form-input" id="f-nl" rows="1" maxlength="5000" aria-describedby="ai-guidance"
+              placeholder="例：欧标双枪 240kW 液冷超充，带 215kWh 储能"></textarea></div>
+          <div class="form-group config-generate-cell"><span class="form-label">执行</span>
+            <button class="btn-primary" onclick="generateSchematic()" aria-controls="workspace-column step-log">⚡ 生成充电桩原理图</button></div>
+    </div>
 
-    </section>
-    <section class="config-group config-actions" aria-labelledby="config-ai-title">
-    <div class="section-title" id="config-ai-title">需求翻译（可选）</div>
-    <div class="form-group"><label class="form-label" for="f-model">AI 提供方</label>
-      <select class="form-input" id="f-model">
-        <option value="local" selected>本地规则解析（不发送文本）</option>
-        <option value="kimi">Kimi（服务端代理）</option>
-        <option value="deepseek">DeepSeek（服务端代理）</option>
-        <option value="glm">GLM（服务端代理）</option>
-      </select>
-      <div class="field-help" id="ai-provider-status">正在检查服务端 AI 可用性…</div>
+    <div class="config-status-line">
+      <span><b>接口基线</b><span id="std-help"></span></span>
+      <span><b>AI 状态</b><span id="ai-provider-status">正在检查服务端 AI 可用性…</span></span>
     </div>
-    <div class="form-group"><label class="form-label" for="f-ai-access-token">受控 AI 访问令牌（仅保存在本页内存）</label>
-      <input type="password" class="form-input" id="f-ai-access-token" autocomplete="off" spellcheck="false"
-        placeholder="站点管理员分配的访问令牌；不会写入方案包或浏览器存储">
-      <div class="field-help">公网模型接口默认关闭；令牌只随本次同源请求发送，不会进入 EDEM、BOM、导出文件或日志。</div>
+    <div class="sr-only" aria-live="polite" id="config-guidance">
+      <p id="storage-guidance">储能耦合方式会改变转换级数和并网边界；并网批复、防孤岛、消防和保护配合必须由项目另行确认。</p>
+      <p id="engineering-guidance">概念参数不能替代短路、保护配合、EMC、温升、消防计算书与型式试验。</p>
+      <p id="ai-guidance">AI 只翻译需求，不参与电气计算。访问令牌仅保存在本页内存；请勿在自然语言需求中填写密钥、客户身份或其他敏感信息。</p>
     </div>
-    <div class="form-group"><label class="form-label" for="f-nl">💡 自然语言需求</label>
-      <textarea class="form-input" id="f-nl" rows="3" style="resize:vertical"
-        placeholder="例：欧标双枪 240kW 液冷超充，带 215kWh 储能直流耦合，OCPP 2.0.1，室外 IP55"></textarea>
-      <div class="field-help">不填则使用表单。选择服务端 AI 时仅发送此处文本用于参数翻译；请勿填写密钥、客户身份或其他敏感信息。服务端未配置时自动退回本地规则解析。</div>
-    </div>
-    <div class="form-group"><label class="form-label" for="f-pref">选型偏好</label>
-      <select class="form-input" id="f-pref">
-        <option value="balance" selected>均衡（性价比）</option>
-        <option value="cost">成本优先</option>
-        <option value="reliability">可靠性优先</option>
-      </select></div>
 
     <div class="review-box" id="requirement-review" style="display:none">
       <div class="review-title">需求翻译复核</div>
@@ -440,20 +425,12 @@
       </label>
     </div>
 
-    <button class="btn-primary" onclick="generateSchematic()">⚡ 生成充电桩原理图</button>
-    <div class="step-log" id="step-log"></div>
-    </section>
-    </div>
+    <div class="step-log" id="step-log" role="status" aria-live="polite"></div>
   </div>
 
   <!-- ============ 下: 全宽原理图工作区 ============ -->
-  <div class="workspace-column">
-    <div id="empty-hint" style="padding:80px 20px;text-align:center;color:var(--text2)">
-      <div style="font-size:44px;margin-bottom:12px">🔌</div>
-      <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">请先在上方控制台填写充电桩参数</div>
-      <div style="font-size:12px">点击「生成充电桩原理图」后，此处展示自动选型结果与自动选幅的方案级电气原理图</div>
-    </div>
-    <div id="result-area" style="display:none">
+  <div class="workspace-column" id="workspace-column" role="region" aria-label="已生成的充电桩电气原理图" tabindex="-1" hidden>
+    <div id="result-area" hidden>
       <div class="kpi-grid" id="summary-cards"></div>
       <details class="result-drawer" id="engineering-state-drawer">
         <summary>工程状态、假设、功能安全与质量画像</summary>
@@ -573,6 +550,6 @@
 </footer>
 
 <script src="js/engine-bundle.js?v=sha256-94d5a40d426c01b04968bb9839aabbac553710a9782a55207bc2905c8105f55c" data-generated-bundle-hash="sha256-94d5a40d426c01b04968bb9839aabbac553710a9782a55207bc2905c8105f55c"></script>
-<script src="js/app.js?v=sha256-e7fe9f025265525ff0fc62bd355557cf03704df45bd9497ec71b743ebc1325ba" data-generated-app-hash="sha256-e7fe9f025265525ff0fc62bd355557cf03704df45bd9497ec71b743ebc1325ba"></script>
+<script src="js/app.js?v=sha256-859751c46c001cb3aa483ebf6f631452ae31c4944e49cde9c1b3a452c035e837" data-generated-app-hash="sha256-859751c46c001cb3aa483ebf6f631452ae31c4944e49cde9c1b3a452c035e837"></script>
 </body>
 </html>

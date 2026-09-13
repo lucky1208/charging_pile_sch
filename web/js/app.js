@@ -255,6 +255,10 @@
     if (state.generating) return;
     state.generating = true;
     const log = $('step-log');
+    const configPanel = $('design-config-panel');
+    const workspace = $('workspace-column');
+    const resultArea = $('result-area');
+    if (configPanel) configPanel.setAttribute('aria-busy', 'true');
     log.innerHTML = '';
     log.style.display = 'block';
     const text = $('f-nl').value.trim();
@@ -342,18 +346,25 @@
       renderEngineeringBom();
       prepareSchematicDocument();
       renderSheetTabs();
-      $('empty-hint').style.display = 'none';
-      $('result-area').style.display = 'flex';
+      if (workspace) workspace.hidden = false;
+      if (resultArea) resultArea.hidden = false;
+      document.body.classList.add('has-result');
       if (state.renderedSchematicDocument && state.activeSheetId) activateSchematicSheet(state.activeSheetId);
       renderQualityStatus();
       initializeSchematicEditor();
       logStep('✅ 已生成确定性充电桩原理图。', 'ok');
+      log.style.display = 'none';
+      if (workspace) workspace.focus({ preventScroll: true });
       $('result-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) {
+      if (workspace) workspace.hidden = true;
+      if (resultArea) resultArea.hidden = true;
+      document.body.classList.remove('has-result');
       logStep('生成失败：' + humanError(error), 'warn');
       alert('原理图未生成：' + humanError(error));
     } finally {
       state.generating = false;
+      if (configPanel) configPanel.setAttribute('aria-busy', 'false');
     }
   };
 
@@ -2042,7 +2053,7 @@
   function toggleEssFields() {
     const enabled = $('f-ess') && $('f-ess').value === '1';
     const box = $('ess-fields');
-    if (box) box.style.display = enabled ? 'block' : 'none';
+    if (box) box.hidden = !enabled;
   }
   function updateStandardHelp() {
     const help = $('std-help');
